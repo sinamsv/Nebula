@@ -53,8 +53,8 @@ Nebula is an advanced AI-powered Discord bot built with Python and discord.py, f
 ### 1. Clone or Download the Repository
 
 ```bash
-git clone <repository-url>
-cd nebula-bot
+git clone https://github.com/sinamsv/NebulaBot
+cd NebulaBot
 ```
 
 ### 2. Install Dependencies
