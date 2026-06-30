@@ -2,6 +2,26 @@
 
 All notable changes to Nebula Discord Bot will be documented in this file.
 
+## [1.2.0] - 2026-02-19
+
+### Added
+- **Nebula Coin System**: A new rate-limiting system for AI responses and searches.
+  - Every user starts with 10 coins per guild.
+  - 1 coin per AI message, 2 coins per search.
+  - Automatic 8-hour reset (non-stacking).
+- **Full Slash Command Migration**: All bot commands have been migrated to Discord Slash Commands.
+  - New user commands: `/coin`, `/search`.
+  - New admin commands: `/add_coin`, `/admin_logs`, `/memory_stats`, `/reset_memory`.
+- **Database Schema Updates**: Added `coin_balances` table to track user budget and reset timers.
+- **Improved Memory Management**: Enhanced memory tracking and reset capabilities via slash commands.
+- **AI Model Upgrade**: Recommended model updated to `gemini-3.1-flash-lite` for superior performance and cost-efficiency.
+
+### Changed
+- Migrated all manual prefix commands (`!`) to slash commands (`/`).
+- Updated `ai_handler.py` and `search_tool.py` to integrate with the Coin System.
+- Refactored `bot.py` to handle slash command syncing and registration.
+- Enhanced `DOCUMENTATION.md` and `README.md` to reflect the new command structure and features.
+
 ## [1.1.0] - 2026-02-19
 
 ### Changed
@@ -10,50 +30,6 @@ All notable changes to Nebula Discord Bot will be documented in this file.
 - Updated `ai_handler.py` to use `AsyncOpenAI` client with proper async handling
 - Improved response handling for new OpenAI API structure
 - All code and comments are now in English
-
-### Migration Guide from 0.28.x to 1.12.0+
-
-If you're upgrading from an older version:
-
-1. **Update dependencies:**
-   ```bash
-   pip install --upgrade openai>=1.12.0
-   ```
-
-2. **Changes in code:**
-   - Old: `openai.ChatCompletion.acreate()`
-   - New: `AsyncOpenAI().chat.completions.create()`
-
-3. **Response structure:**
-   - Old: `response.choices[0].message`
-   - New: `response.choices[0].message` (same structure, but obtained differently)
-
-4. **Client initialization:**
-   ```python
-   # Old way
-   openai.api_key = "key"
-   openai.base_url = "url"
-   
-   # New way
-   client = AsyncOpenAI(
-       api_key="key",
-       base_url="url"
-   )
-   ```
-
-### Technical Details
-
-- The new OpenAI client provides better type hints and error handling
-- Async operations are now more explicit with `AsyncOpenAI` client
-- Custom base URLs (like Liara.ir) are fully supported
-- All tool calls and function calling work exactly the same way
-
-### Compatibility
-
-- ✅ Works with OpenAI API
-- ✅ Works with OpenAI-compatible APIs (Azure, Liara.ir, etc.)
-- ✅ Maintains all existing functionality
-- ✅ No changes needed in database or other cogs
 
 ## [1.0.0] - 2026-02-19
 
@@ -65,11 +41,3 @@ If you're upgrading from an older version:
 - Google Custom Search integration
 - SQLite database with 4 tables
 - Comprehensive documentation
-
-### Features
-- Conversation memory with automatic reset
-- User identification by display name
-- Reply context awareness
-- Message splitting for long responses
-- Admin action logging
-- Memory usage tracking commands
