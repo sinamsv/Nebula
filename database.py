@@ -324,7 +324,7 @@ class DatabaseManager:
     def spend_coins(self, user_id: str, guild_id: str, amount: int) -> Dict:
         """Attempt to spend `amount` coins. Applies 8h reset first if due.
         Returns dict: {'success': bool, 'balance': int, 'seconds_until_reset': int}
-        If balance (after reset check) is <= 0, fails without deducting."""
+        If balance (after reset check) is less than amount, fails without deducting."""
         conn = self.get_connection()
         cursor = conn.cursor()
 
@@ -333,7 +333,7 @@ class DatabaseManager:
 
         seconds_until_reset = max(0, int(8 * 3600 - (datetime.utcnow() - last_reset_dt).total_seconds()))
 
-        if balance <= 0:
+        if balance < amount or balance <= 0:
             conn.commit()
             conn.close()
             return {'success': False, 'balance': balance, 'seconds_until_reset': seconds_until_reset}
