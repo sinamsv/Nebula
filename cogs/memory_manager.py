@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 from database import DatabaseManager
 import tiktoken
@@ -70,16 +71,21 @@ class MemoryManager(commands.Cog):
             'percentage': round(percentage, 2),
             'remaining': self.max_tokens - total_tokens
         }
-    
-    @commands.command(name='memory_stats')
-    @commands.has_permissions(administrator=True)
-    async def memory_stats(self, ctx):
+
+    # ------------------------------------------------------------------
+    # Slash Commands
+    # ------------------------------------------------------------------
+
+    @app_commands.command(name='memory_stats', description='[Admin] Show memory usage statistics for this channel.')
+    @app_commands.guild_only()
+    @app_commands.checks.has_permissions(administrator=True)
+    async def memory_stats(self, interaction: discord.Interaction):
         """Show memory usage statistics for current channel."""
-        guild_id = str(ctx.guild.id)
-        channel_id = str(ctx.channel.id)
-        
+        guild_id = str(interaction.guild.id)
+        channel_id = str(interaction.channel.id)
+
         stats = self.get_token_usage(guild_id, channel_id)
-        
+
         embed = discord.Embed(
             title="💾 Memory Usage Statistics",
             color=discord.Color.blue()
@@ -104,24 +110,40 @@ class MemoryManager(commands.Cog):
             value=f"{stats['max_tokens']:,} tokens",
             inline=False
         )
-        
-        await ctx.send(embed=embed)
-    
-    @commands.command(name='reset_memory')
-    @commands.has_permissions(administrator=True)
-    async def reset_memory(self, ctx):
+
+        await interaction.response.send_message(embed=embed)
+
+    @memory_stats.error
+    async def memory_stats_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message("❌ Only administrators can use this command.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ Error: {str(error)}", ephemeral=True)
+
+    @app_commands.command(name='reset_memory', description='[Admin] Reset conversation memory for this channel.')
+    @app_commands.guild_only()
+    @app_commands.checks.has_permissions(administrator=True)
+    async def reset_memory(self, interaction: discord.Interaction):
         """Reset conversation memory for current channel."""
-        guild_id = str(ctx.guild.id)
-        channel_id = str(ctx.channel.id)
-        
+        guild_id = str(interaction.guild.id)
+        channel_id = str(interaction.channel.id)
+
         self.db.reset_conversation(guild_id, channel_id)
-        
+
         embed = discord.Embed(
             title="🔄 Memory Reset",
             description="Conversation memory has been reset for this channel.",
             color=discord.Color.green()
         )
-        await ctx.send(embed=embed)
+        await interaction.response.send_message(embed=embed)
+
+    @reset_memory.error
+    async def reset_memory_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message("❌ Only administrators can use this command.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ Error: {str(error)}", ephemeral=True)
+
 
 async def setup(bot):
     """Setup function to load the cog."""

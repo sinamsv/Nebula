@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 from database import DatabaseManager
 import re
@@ -201,25 +202,33 @@ class AdminTools(commands.Cog):
         
         except Exception as e:
             return f"❌ Error checking user activity: {str(e)}"
-    
-    @commands.command(name='admin_logs')
-    @commands.has_permissions(administrator=True)
-    async def admin_logs(self, ctx, limit: int = 10):
+
+    # ------------------------------------------------------------------
+    # Slash Commands
+    # ------------------------------------------------------------------
+
+    @app_commands.command(name='admin_logs', description='[Admin] View recent admin action logs.')
+    @app_commands.guild_only()
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.describe(limit='Number of log entries to show (max 50, default 10)')
+    async def admin_logs(self, interaction: discord.Interaction, limit: int = 10):
         """View recent admin action logs."""
         if limit > 50:
             limit = 50
-        
-        logs = self.db.get_admin_logs(str(ctx.guild.id), limit)
-        
+        elif limit < 1:
+            limit = 1
+
+        logs = self.db.get_admin_logs(str(interaction.guild.id), limit)
+
         if not logs:
-            await ctx.send("No admin logs found.")
+            await interaction.response.send_message("No admin logs found.")
             return
-        
+
         embed = discord.Embed(
             title="📋 Admin Action Logs",
             color=discord.Color.gold()
         )
-        
+
         for i, log in enumerate(logs[:10], 1):
             value = f"**Action:** {log['action_type']}\n"
             if log['target_name']:
@@ -227,14 +236,22 @@ class AdminTools(commands.Cog):
             if log['details']:
                 value += f"**Details:** {log['details']}\n"
             value += f"**Time:** {log['timestamp']}"
-            
+
             embed.add_field(
                 name=f"{i}. {log['admin_name']}",
                 value=value,
                 inline=False
             )
-        
-        await ctx.send(embed=embed)
+
+        await interaction.response.send_message(embed=embed)
+
+    @admin_logs.error
+    async def admin_logs_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message("❌ Only administrators can use this command.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ Error: {str(error)}", ephemeral=True)
+
 
 async def setup(bot):
     """Setup function to load the cog."""

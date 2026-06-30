@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 from database import DatabaseManager
 
@@ -26,7 +27,7 @@ class CoinManager(commands.Cog):
     - Balance resets to 10 (not stacked) 8 hours after the user's last reset point.
     - When balance hits 0 (or below), the bot refuses to respond and tells
       the user how long until their coins reset.
-    - Admins can grant/set coins via !add_coin, bypassing the reset logic.
+    - Admins can grant/set coins via /add_coin, bypassing the reset logic.
     """
 
     MESSAGE_COST = 1
@@ -56,18 +57,19 @@ class CoinManager(commands.Cog):
         return (
             f"⛔ {display_name}, you're out of coins! "
             f"Next reset in approximately **{format_seconds(seconds_until_reset)}**.\n"
-            f"You can ask an admin to give you some coins using `!add_coin`."
+            f"You can ask an admin to give you some coins using `/add_coin`."
         )
 
     # ------------------------------------------------------------------
-    # Commands
+    # Slash Commands
     # ------------------------------------------------------------------
 
-    @commands.command(name='coin')
-    async def coin_command(self, ctx):
+    @app_commands.command(name='coin', description='Show your current Nebula Coin balance and time until reset.')
+    @app_commands.guild_only()
+    async def coin_command(self, interaction: discord.Interaction):
         """Show the current user's Nebula Coin balance and time until reset."""
-        user_id = str(ctx.author.id)
-        guild_id = str(ctx.guild.id)
+        user_id = str(interaction.user.id)
+        guild_id = str(interaction.guild.id)
 
         status = self.get_status(user_id, guild_id)
         balance = status['balance']
@@ -85,53 +87,62 @@ class CoinManager(commands.Cog):
         )
         embed.set_footer(text=f"Each message costs {self.MESSAGE_COST} coin and each search costs {self.SEARCH_COST} coins.")
 
-        await ctx.send(embed=embed)
+        await interaction.response.send_message(embed=embed)
 
-    @commands.command(name='add_coin')
-    @commands.has_permissions(administrator=True)
-    async def add_coin_command(self, ctx, member: discord.Member, amount: int, mode: str = "add"):
+    @app_commands.command(name='add_coin', description="[Admin] Add to or set a user's Nebula Coin balance.")
+    @app_commands.guild_only()
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.describe(
+        member='The user whose balance you want to modify',
+        amount='The amount of coins to add or set',
+        mode='Whether to add this amount to the current balance, or set the balance to this exact amount'
+    )
+    @app_commands.choices(mode=[
+        app_commands.Choice(name='add', value='add'),
+        app_commands.Choice(name='set', value='set'),
+    ])
+    async def add_coin_command(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        amount: int,
+        mode: app_commands.Choice[str]
+    ):
         """Admin-only: add to or set a user's coin balance.
 
         Usage:
-          !add_coin @user 5 add   -> adds 5 coins to current balance
-          !add_coin @user 5 set   -> sets balance to exactly 5
+          /add_coin member:@user amount:5 mode:add   -> adds 5 coins to current balance
+          /add_coin member:@user amount:5 mode:set   -> sets balance to exactly 5
         """
-        mode = mode.lower().strip()
-        if mode not in ("add", "set"):
-            await ctx.send("❌ Invalid mode. Use `add` or `set`. Example: `!add_coin @user 5 add`")
-            return
+        mode_value = mode.value
 
-        guild_id = str(ctx.guild.id)
+        guild_id = str(interaction.guild.id)
         user_id = str(member.id)
 
-        new_balance = self.db.modify_coins(user_id, guild_id, amount, mode)
+        new_balance = self.db.modify_coins(user_id, guild_id, amount, mode_value)
 
         # Log the action for audit purposes
         self.db.log_admin_action(
             guild_id,
-            str(ctx.author.id),
-            ctx.author.display_name,
+            str(interaction.user.id),
+            interaction.user.display_name,
             "add_coin",
             user_id,
             member.display_name,
-            f"mode={mode}, amount={amount}, new_balance={new_balance}"
+            f"mode={mode_value}, amount={amount}, new_balance={new_balance}"
         )
 
-        verb = "added to" if mode == "add" else "set for"
-        await ctx.send(
+        verb = "added to" if mode_value == "add" else "set for"
+        await interaction.response.send_message(
             f"✅ Coins **{verb}** {member.display_name}. New balance: **{new_balance}** coins."
         )
 
     @add_coin_command.error
-    async def add_coin_error(self, ctx, error):
-        if isinstance(error, commands.MissingPermissions):
-            await ctx.send("❌ Only administrators can use this command.")
-        elif isinstance(error, commands.MemberNotFound):
-            await ctx.send("❌ User not found. Please mention a user or provide a valid ID.")
-        elif isinstance(error, commands.BadArgument):
-            await ctx.send("❌ Invalid input. Correct example: `!add_coin @user 5 add`")
+    async def add_coin_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message("❌ Only administrators can use this command.", ephemeral=True)
         else:
-            await ctx.send(f"❌ Error: {str(error)}")
+            await interaction.response.send_message(f"❌ Error: {str(error)}", ephemeral=True)
 
 
 async def setup(bot):

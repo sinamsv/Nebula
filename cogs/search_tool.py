@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 import aiohttp
 import os
@@ -57,34 +58,38 @@ class SearchTool(commands.Cog):
         except Exception as e:
             return f"❌ Error performing search: {str(e)}"
 
-    @commands.command(name='search')
-    async def search_command(self, ctx, *, query: str):
+    @app_commands.command(name='search', description='Perform a web search using Google Custom Search. Costs Nebula Coins.')
+    @app_commands.guild_only()
+    @app_commands.describe(query='What you want to search for')
+    async def search_command(self, interaction: discord.Interaction, query: str):
         """Perform a web search using Google Custom Search."""
         # --- Nebula Coin check: search costs coins even via direct command ---
         if not self.coin_manager:
             self.coin_manager = self.bot.get_cog('CoinManager')
 
         if self.coin_manager:
-            user_id = str(ctx.author.id)
-            guild_id = str(ctx.guild.id)
+            user_id = str(interaction.user.id)
+            guild_id = str(interaction.guild.id)
             spend_result = self.coin_manager.check_and_spend(
                 user_id, guild_id, self.coin_manager.SEARCH_COST
             )
             if not spend_result['success']:
-                await ctx.send(
+                await interaction.response.send_message(
                     self.coin_manager.insufficient_funds_message(
-                        ctx.author.display_name,
+                        interaction.user.display_name,
                         spend_result['seconds_until_reset']
                     )
                 )
                 return
 
-        async with ctx.typing():
-            results = await self.perform_search(query)
+        # Defer since the search call may take a moment
+        await interaction.response.defer()
+
+        results = await self.perform_search(query)
 
         # Split long messages if needed
         if len(results) <= 2000:
-            await ctx.send(results)
+            await interaction.followup.send(results)
         else:
             # Split into chunks
             chunks = []
@@ -101,8 +106,10 @@ class SearchTool(commands.Cog):
             if current_chunk:
                 chunks.append(current_chunk.strip())
 
-            for chunk in chunks:
-                await ctx.send(chunk)
+            # First chunk goes via followup (the initial response), rest as regular sends
+            await interaction.followup.send(chunks[0])
+            for chunk in chunks[1:]:
+                await interaction.channel.send(chunk)
 
 async def setup(bot):
     """Setup function to load the cog."""
