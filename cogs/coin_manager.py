@@ -32,6 +32,7 @@ class CoinManager(commands.Cog):
 
     MESSAGE_COST = 1
     SEARCH_COST = 2
+    IMAGE_COST = 5
 
     def __init__(self, bot):
         self.bot = bot
@@ -85,7 +86,7 @@ class CoinManager(commands.Cog):
             value=format_seconds(seconds_until_reset),
             inline=True
         )
-        embed.set_footer(text=f"Each message costs {self.MESSAGE_COST} coin and each search costs {self.SEARCH_COST} coins.")
+        embed.set_footer(text=f"Each message costs {self.MESSAGE_COST} coin, each search costs {self.SEARCH_COST} coins, and each image costs {self.IMAGE_COST} coins.")
 
         await interaction.response.send_message(embed=embed)
 

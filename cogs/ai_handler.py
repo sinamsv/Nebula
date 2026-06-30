@@ -209,6 +209,21 @@ Always be respectful, helpful, and maintain a positive tone. You have access to 
         if message.attachments:
             image_urls = [att.url for att in message.attachments if att.content_type and att.content_type.startswith('image/')]
             if image_urls:
+                # --- Nebula Coin check: images cost extra coins ---
+                if self.coin_manager:
+                    total_image_cost = len(image_urls) * self.coin_manager.IMAGE_COST
+                    spend_result = self.coin_manager.check_and_spend(
+                        user_id, guild_id, total_image_cost
+                    )
+                    if not spend_result['success']:
+                        await message.channel.send(
+                            self.coin_manager.insufficient_funds_message(
+                                message.author.display_name,
+                                spend_result['seconds_until_reset']
+                            )
+                        )
+                        return
+
                 user_content += f"\n\n[User attached {len(image_urls)} image(s)]"
 
         # Get conversation history
