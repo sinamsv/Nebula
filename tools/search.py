@@ -1,37 +1,35 @@
-import discord
-from discord.ext import commands
+"""Platform-agnostic web search tool.
+
+Supports two interchangeable providers: Google Custom Search and Tavily
+(an AI-native search API). Which provider is used is controlled by the
+SEARCH_PROVIDER environment variable ('google' or 'tavily', defaults to
+'google'). Both providers' credentials can be configured at the same
+time; only the selected one is used.
+
+Enablement rule (deliberately simple, no automatic fallback):
+- If the credentials for the SELECTED provider are missing, the entire
+  search tool is disabled, even if the other provider's credentials are
+  present.
+- If the selected provider's credentials ARE present, search proceeds
+  normally with that provider. No mixing within a single request.
+
+This module has zero discord.py (or any platform SDK) imports. Any
+adapter — discord_bot/, a future telegram_bot/, a future API server —
+imports SearchTool directly and calls perform_search(). The Discord
+slash command wrapper lives in discord_bot/search_command.py and is a
+thin pass-through to this.
+"""
 import aiohttp
 import os
 
 
-class SearchTool(commands.Cog):
-    """Web search integration supporting two interchangeable providers:
-    Google Custom Search and Tavily (an AI-native search API).
-
-    Which provider is actually used is controlled by the SEARCH_PROVIDER
-    environment variable ('google' or 'tavily', defaults to 'google').
-    Both providers' credentials can be configured at the same time; only
-    the selected one is used. Google is never removed from the codebase,
-    since keeping both wired up is what gives flexibility to switch later.
-
-    Enablement rule (deliberately simple, no automatic fallback):
-    - If the credentials for the SELECTED provider are missing, the entire
-      search tool is disabled, even if the other provider's credentials
-      are present. Administrators are notified once via DM (see bot.py /
-      on_ready wiring) so a misconfiguration doesn't go unnoticed.
-    - If the selected provider's credentials ARE present, search proceeds
-      normally with that provider. No mixing within a single request.
-    """
-
+class SearchTool:
     TAVILY_SEARCH_URL = "https://api.tavily.com/search"
     GOOGLE_SEARCH_URL = "https://www.googleapis.com/customsearch/v1"
 
     VALID_PROVIDERS = ("google", "tavily")
 
-    def __init__(self, bot):
-        self.bot = bot
-        self.coin_manager = None
-
+    def __init__(self):
         # Google credentials
         self.google_api_key = os.getenv('GOOGLE_SEARCH_API_KEY')
         self.google_engine_id = os.getenv('GOOGLE_SEARCH_ENGINE_ID')
@@ -53,10 +51,6 @@ class SearchTool(commands.Cog):
         # Determine enabled/disabled state up front based on the selected
         # provider's credentials only (no cross-provider fallback).
         self.enabled, self.disabled_reason = self._check_configuration()
-
-        # Ensures the "search disabled" DM is only sent once per bot run,
-        # not once per guild or per message.
-        self._admin_notice_sent = False
 
         if self.enabled:
             print(f"Search tool enabled using provider: {self.provider}")
@@ -88,18 +82,14 @@ class SearchTool(commands.Cog):
             )
 
     # ------------------------------------------------------------------
-    # Provider-agnostic entry point (unchanged signature/behavior from the
-    # AI handler and search command's point of view)
+    # Provider-agnostic entry point
     # ------------------------------------------------------------------
 
     async def perform_search(self, query: str, num_results: int = 5) -> str:
         """Perform a web search using whichever provider is configured.
-        Callers (ai_handler.py, search_command) don't need to know or care
-        which provider is behind this."""
+        Callers don't need to know or care which provider is behind this."""
         if not self.enabled:
-            return (
-                f"❌ Web search is currently disabled. {self.disabled_reason}"
-            )
+            return f"❌ Web search is currently disabled. {self.disabled_reason}"
 
         try:
             if self.provider == 'tavily':
@@ -180,92 +170,3 @@ class SearchTool(commands.Cog):
             results_text += f"🔗 {link}\n\n"
 
         return results_text
-
-    # ------------------------------------------------------------------
-    # Admin notification when search is disabled due to misconfiguration
-    # ------------------------------------------------------------------
-
-    async def notify_admins_if_disabled(self):
-        """Send a one-time DM to every administrator in every guild the bot
-        is in, warning that search is disabled due to a missing API key.
-        Intended to be called once from bot.py's on_ready handler, after
-        guilds/members are populated. Safe to call multiple times; only
-        sends once per bot run."""
-        if self.enabled or self._admin_notice_sent:
-            return
-
-        self._admin_notice_sent = True
-        message = (
-            "⚠️ **Nebula Search Disabled**\n"
-            f"{self.disabled_reason}\n\n"
-            "No search provider is currently active, so the search tool "
-            "will not respond to search requests until this is fixed."
-        )
-
-        for guild in self.bot.guilds:
-            for member in guild.members:
-                if member.bot:
-                    continue
-                if member.guild_permissions.administrator:
-                    try:
-                        await member.send(message)
-                    except discord.Forbidden:
-                        # User has DMs disabled or blocked the bot; skip silently.
-                        pass
-                    except Exception as e:
-                        print(f"Failed to DM admin {member.display_name} about disabled search: {e}")
-
-    # ------------------------------------------------------------------
-    # Commands
-    # ------------------------------------------------------------------
-
-    @commands.command(name='search')
-    async def search_command(self, ctx, *, query: str):
-        """Perform a web search using the configured provider."""
-        # --- Nebula Coin check: search costs coins even via direct command ---
-        if not self.coin_manager:
-            self.coin_manager = self.bot.get_cog('CoinManager')
-
-        if self.coin_manager:
-            user_id = str(ctx.author.id)
-            guild_id = str(ctx.guild.id)
-            spend_result = self.coin_manager.check_and_spend(
-                user_id, guild_id, self.coin_manager.SEARCH_COST
-            )
-            if not spend_result['success']:
-                await ctx.send(
-                    self.coin_manager.insufficient_funds_message(
-                        ctx.author.display_name,
-                        spend_result['seconds_until_reset']
-                    )
-                )
-                return
-
-        async with ctx.typing():
-            results = await self.perform_search(query)
-
-        # Split long messages if needed
-        if len(results) <= 2000:
-            await ctx.send(results)
-        else:
-            chunks = []
-            current_chunk = ""
-
-            for line in results.split('\n'):
-                if len(current_chunk) + len(line) + 1 <= 2000:
-                    current_chunk += line + '\n'
-                else:
-                    if current_chunk:
-                        chunks.append(current_chunk.strip())
-                    current_chunk = line + '\n'
-
-            if current_chunk:
-                chunks.append(current_chunk.strip())
-
-            for chunk in chunks:
-                await ctx.send(chunk)
-
-
-async def setup(bot):
-    """Setup function to load the cog."""
-    await bot.add_cog(SearchTool(bot))
