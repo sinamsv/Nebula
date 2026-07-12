@@ -4,9 +4,10 @@ This is the piece that used to be tangled inside cogs/ai_handler.py,
 mixing OpenAI tool-calling logic with discord.Message handling. Now
 split: this module knows nothing about Discord, Telegram, or any
 specific platform. It takes plain values in and returns plain response
-text out. discord_bot/message_listener.py is the (thin) piece that knows
-how to turn a discord.Message into a call to handle_turn() and how to
-send the string(s) it returns back to a discord.TextChannel.
+text out. discord_bot/message_listener.py (and telegram_bot's message
+handler) are the thin pieces that know how to turn a platform-native
+message object into a call to handle_turn() and how to send the
+string(s) it returns back on that platform.
 
 Tool execution has one unavoidable platform leak: kick_user, ban_user,
 and create_channel operate on a discord.Guild (see tools/moderation.py's
@@ -14,9 +15,9 @@ docstring for why this can't be abstracted further without losing what
 those actions do). handle_turn() accepts an optional `discord_guild`
 parameter for exactly this — passed straight through to
 tools/moderation.py without this module otherwise touching discord.py.
-A future platform that doesn't support guild moderation simply never
-passes discord_guild, and the admin tool calls related to it are omitted
-from the toolset (see get_available_tools).
+A platform that doesn't support guild moderation (Telegram, today)
+simply never passes discord_guild, and the admin tool calls related to
+it are omitted from the toolset (see get_available_tools).
 """
 import json
 import os
@@ -32,12 +33,6 @@ from tools import moderation
 
 
 class TurnResult:
-    """Everything a platform adapter needs to display the result of one
-    AI turn: the assistant's text reply (if any), any tool-result
-    messages that should be sent as separate messages (matching the old
-    behavior of sending tool output before the text reply), and an
-    optional soft memory warning to append."""
-
     def __init__(self):
         self.tool_messages: List[str] = []
         self.reply_text: Optional[str] = None
@@ -56,7 +51,11 @@ class AIHandler:
 
     One AIHandler instance is shared across all platform adapters in a
     process (constructed once in main.py), same as core.database/auth/
-    memory are shared.
+    memory/coins are shared. `coin_manager` here is a core.coins.CoinManager
+    instance (or any object exposing the same check_and_spend/MESSAGE_COST/
+    SEARCH_COST/insufficient_funds_message interface) — this module has
+    never imported discord.py and doesn't need to know that CoinManager
+    used to also be a discord.py Cog before it was extracted to core/.
     """
 
     def __init__(self, db: DatabaseManager, auth: AuthManager, memory: MemoryManager,
@@ -100,10 +99,6 @@ class AIHandler:
             print("WARNING: system.txt not found, using default system prompt")
 
     def get_available_tools(self, is_admin: bool, supports_guild_moderation: bool) -> List[Dict]:
-        """Tool list depends on admin status AND whether this platform
-        even has a concept of guild moderation (kick/ban/create_channel).
-        Search is universal; moderation tools only appear for admins on
-        platforms that support them."""
         tools = [{
             "type": "function",
             "function": {
@@ -192,16 +187,6 @@ class AIHandler:
         message_text: str,
         discord_guild=None,
     ) -> TurnResult:
-        """Process one conversational turn end-to-end: identity/memory/
-        coin gating, the model call, tool dispatch, and memory writes.
-        Returns a TurnResult describing what the adapter should display —
-        never raises for expected failure modes (unapproved account, out
-        of coins, memory full); those come back as `blocked_reason`.
-
-        `discord_guild` is optional and only meaningful when
-        source_platform == "discord" and the model decides to call a
-        guild-moderation tool. See module docstring.
-        """
         result = TurnResult()
 
         try:
@@ -294,10 +279,6 @@ class AIHandler:
                         )
                 return await self.search_tool.perform_search(function_args.get('query'))
 
-            # Guild-moderation tools are only ever offered to the model
-            # when discord_guild is not None (see get_available_tools),
-            # but we defensively re-check here in case of a malformed/
-            # stale tool call.
             if discord_guild is None:
                 return f"❌ Tool '{function_name}' is not available in this context."
 

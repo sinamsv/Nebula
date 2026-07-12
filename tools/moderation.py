@@ -25,8 +25,6 @@ from core.database import DatabaseManager
 
 
 def extract_discord_user_id(user_mention: str) -> Optional[int]:
-    """Extract a Discord user ID from a mention string like <@123> or
-    <@!123>, or a raw numeric ID string. Returns None if neither parses."""
     match = re.search(r'<@!?(\d+)>', user_mention)
     if match:
         return int(match.group(1))
@@ -38,8 +36,6 @@ def extract_discord_user_id(user_mention: str) -> Optional[int]:
 
 async def kick_user(db: DatabaseManager, guild: discord.Guild, admin_display_name: str,
                      user_mention: str, reason: str) -> str:
-    """Kick a member from the guild. Caller must have already verified
-    the invoking admin's Nebula permissions."""
     user_id = extract_discord_user_id(user_mention)
     if not user_id:
         return f"❌ Could not identify user from: {user_mention}"
@@ -53,11 +49,7 @@ async def kick_user(db: DatabaseManager, guild: discord.Guild, admin_display_nam
             return f"❌ Cannot kick {member.display_name} - their role is higher than or equal to mine."
 
         await member.kick(reason=reason)
-
-        db.log_admin_action(
-            None, admin_display_name, "kick", None, member.display_name, reason
-        )
-
+        db.log_admin_action(None, admin_display_name, "kick", None, member.display_name, reason)
         return f"✅ Successfully kicked **{member.display_name}** (ID: {member.id})\nReason: {reason}"
 
     except discord.Forbidden:
@@ -68,8 +60,6 @@ async def kick_user(db: DatabaseManager, guild: discord.Guild, admin_display_nam
 
 async def ban_user(db: DatabaseManager, guild: discord.Guild, admin_display_name: str,
                     user_mention: str, reason: str) -> str:
-    """Ban a member from the guild. Caller must have already verified
-    the invoking admin's Nebula permissions."""
     user_id = extract_discord_user_id(user_mention)
     if not user_id:
         return f"❌ Could not identify user from: {user_mention}"
@@ -83,11 +73,7 @@ async def ban_user(db: DatabaseManager, guild: discord.Guild, admin_display_name
             return f"❌ Cannot ban {member.display_name} - their role is higher than or equal to mine."
 
         await member.ban(reason=reason, delete_message_days=0)
-
-        db.log_admin_action(
-            None, admin_display_name, "ban", None, member.display_name, reason
-        )
-
+        db.log_admin_action(None, admin_display_name, "ban", None, member.display_name, reason)
         return f"✅ Successfully banned **{member.display_name}** (ID: {member.id})\nReason: {reason}"
 
     except discord.Forbidden:
@@ -99,9 +85,6 @@ async def ban_user(db: DatabaseManager, guild: discord.Guild, admin_display_name
 async def create_channel(db: DatabaseManager, guild: discord.Guild, admin_display_name: str,
                           channel_name: str, category_name: str = None,
                           channel_type: str = "text") -> str:
-    """Create a text or voice channel, optionally inside a named category.
-    Caller must have already verified the invoking admin's Nebula
-    permissions."""
     try:
         category = None
 
@@ -124,10 +107,7 @@ async def create_channel(db: DatabaseManager, guild: discord.Guild, admin_displa
         if category:
             details += f" in category: {category.name}"
 
-        db.log_admin_action(
-            None, admin_display_name, "create_channel", None, channel_name, details
-        )
-
+        db.log_admin_action(None, admin_display_name, "create_channel", None, channel_name, details)
         return f"✅ Successfully created {channel_type_display} channel: {channel.mention if channel_type_display == 'text' else channel.name}"
 
     except discord.Forbidden:
@@ -138,15 +118,6 @@ async def create_channel(db: DatabaseManager, guild: discord.Guild, admin_displa
 
 async def check_user_activity(db: DatabaseManager, memory, auth, admin_display_name: str,
                                user_mention: str) -> str:
-    """Report a Nebula user's cross-platform account status and memory
-    usage, resolved from a Discord mention/ID.
-
-    This is the one moderation tool that IS Nebula-aware rather than
-    pure Discord — it reports activity across every platform the target
-    has linked, not just this Discord server, since memory moved to
-    per-user scope. `auth` and `memory` are core.auth.AuthManager and
-    core.memory.MemoryManager instances, passed in rather than
-    constructed here."""
     user_id = extract_discord_user_id(user_mention)
     if not user_id:
         return f"❌ Could not identify user from: {user_mention}"

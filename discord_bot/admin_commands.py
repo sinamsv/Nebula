@@ -8,28 +8,12 @@ DISCORD_PLATFORM = "discord"
 
 
 class AdminCommands(commands.Cog):
-    """Admin-only slash commands: account approval workflow and admin
-    action logs.
-
-    Note: this cog does NOT contain the AI-invoked moderation functions
-    (kick, ban, create_channel, user_activity_check) — those live in
-    tools/moderation.py and are called directly from ai/handler.py's
-    tool-dispatch loop, not through this cog. This cog is purely the
-    slash-command surface for account/admin management.
-
-    Permission model: admin status is a Nebula-level concept (is_admin on
-    nebula_users), not Discord's own guild_permissions.administrator.
-    """
-
     def __init__(self, bot):
         self.bot = bot
         self.db = bot.db
         self.auth = bot.auth
 
     def _require_admin_identity(self, discord_user_id: int):
-        """Returns the Nebula identity dict if the caller is a linked,
-        approved, admin Nebula account. Raises AuthError otherwise with a
-        specific reason."""
         identity = self.auth.resolve_identity(DISCORD_PLATFORM, str(discord_user_id))
         if identity is None:
             raise AuthError(
@@ -41,14 +25,8 @@ class AdminCommands(commands.Cog):
             raise AuthError("❌ Only Nebula admins can do that.")
         return identity
 
-    @app_commands.command(
-        name='approve_user',
-        description='[Admin] Approve or reject a pending Nebula account.'
-    )
-    @app_commands.describe(
-        username='The Nebula username to approve or reject',
-        approve='True to approve, False to reject'
-    )
+    @app_commands.command(name='approve_user', description='[Admin] Approve or reject a pending Nebula account.')
+    @app_commands.describe(username='The Nebula username to approve or reject', approve='True to approve, False to reject')
     async def approve_user_command(self, interaction: discord.Interaction, username: str, approve: bool):
         try:
             approver = self._require_admin_identity(interaction.user.id)
@@ -58,8 +36,7 @@ class AdminCommands(commands.Cog):
 
         try:
             result = self.auth.approve_user(
-                target_username=username,
-                approve=approve,
+                target_username=username, approve=approve,
                 approver_nebula_user_id=approver['nebula_user_id'],
                 approver_display_name=interaction.user.display_name,
             )
@@ -68,14 +45,9 @@ class AdminCommands(commands.Cog):
             return
 
         verb = "approved ✅" if result['approved'] else "rejected ❌"
-        await interaction.response.send_message(
-            f"Nebula account **{result['username']}** has been {verb}."
-        )
+        await interaction.response.send_message(f"Nebula account **{result['username']}** has been {verb}.")
 
-    @app_commands.command(
-        name='pending_users',
-        description='[Admin] List Nebula accounts awaiting approval.'
-    )
+    @app_commands.command(name='pending_users', description='[Admin] List Nebula accounts awaiting approval.')
     async def pending_users_command(self, interaction: discord.Interaction):
         try:
             self._require_admin_identity(interaction.user.id)
@@ -97,10 +69,7 @@ class AdminCommands(commands.Cog):
             )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @app_commands.command(
-        name='add_admin',
-        description="[Admin] Promote a Nebula user to admin."
-    )
+    @app_commands.command(name='add_admin', description="[Admin] Promote a Nebula user to admin.")
     @app_commands.describe(username='The Nebula username to promote to admin')
     async def add_admin_command(self, interaction: discord.Interaction, username: str):
         try:
@@ -119,9 +88,7 @@ class AdminCommands(commands.Cog):
             await interaction.response.send_message(str(e), ephemeral=True)
             return
 
-        await interaction.response.send_message(
-            f"👑 **{result['username']}** is now a Nebula admin."
-        )
+        await interaction.response.send_message(f"👑 **{result['username']}** is now a Nebula admin.")
 
     @app_commands.command(name='admin_logs', description='[Admin] View recent admin action logs.')
     @app_commands.describe(limit='Number of log entries to show (max 50, default 10)')
@@ -157,5 +124,4 @@ class AdminCommands(commands.Cog):
 
 
 async def setup(bot):
-    """Setup function to load the cog."""
     await bot.add_cog(AdminCommands(bot))

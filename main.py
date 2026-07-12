@@ -2,52 +2,80 @@
 
 This is the ONE file you run: `python main.py`.
 
-Today this only starts the Discord adapter (discord_bot.client.run()),
-which internally constructs its own core.database/auth/memory instances
-(see discord_bot/client.py's build_bot()). That's fine as a single-
-adapter setup.
+Both platform adapters (Discord, Telegram) share a single set of
+core.database/auth/memory/coins instances and a single
+ai.handler.AIHandler, all constructed exactly once here. That sharing is
+what makes identity, memory, and coin balance genuinely cross-platform:
+a message sent via Telegram and a message sent via Discord for the SAME
+Nebula account read and write through the exact same objects, not two
+siloed copies of the same sqlite file. This replaces the previous
+Discord-only setup where discord_bot.client.build_bot() constructed its
+own db/auth/memory/search_tool internally — see that module's git
+history / the version of this file before the Telegram adapter existed.
 
-Once a second adapter is added (Telegram, or an API server), this file's
-job changes: it should construct core.database.DatabaseManager,
-core.auth.AuthManager, and core.memory.MemoryManager ONCE here, pass the
-SAME instances into both discord_bot.client.build_bot(...) and e.g.
-telegram_bot.client.build_dispatcher(...), and run both concurrently
-with asyncio.gather(). Sharing one set of core instances (rather than
-each adapter opening its own) is what makes identity and memory actually
-cross-platform instead of two siloed copies of the same sqlite file.
-Sketch of what that will look like:
-
-    async def main():
-        db = DatabaseManager()
-        auth = AuthManager(db)
-        memory = MemoryManager(db)
-
-        discord_bot = discord_bot.client.build_bot(db, auth, memory)
-        telegram_bot = telegram_bot.client.build_dispatcher(db, auth, memory)
-
-        await asyncio.gather(
-            discord_bot.start(os.getenv('DISCORD_TOKEN')),
-            telegram_bot.start_polling(),
-        )
-
-For now, discord_bot.client.run() does the equivalent of the above but
-scoped to just Discord, including its own token check and error
-handling.
+Each adapter is independently optional: whichever of DISCORD_TOKEN /
+TELEGRAM_BOT_TOKEN is set in .env determines which adapter(s) actually
+start. Both, one, or (if neither is set) neither — with an explicit
+error in that last case rather than silently doing nothing, matching
+this project's "explicit failure over silent fallback" principle
+everywhere else (see core/auth.py, core/memory.py, tools/search.py).
 """
+import asyncio
+import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from discord_bot.client import run as run_discord
+from core.database import DatabaseManager
+from core.auth import AuthManager
+from core.memory import MemoryManager
+from core.coins import CoinManager
+from tools.search import SearchTool
+from ai.handler import AIHandler
+
+import discord_bot.client as discord_client
+import telegram_bot.client as telegram_client
 
 
-def main():
-    # Only the Discord adapter exists today. When a Telegram adapter or
-    # API server is added, this becomes an asyncio.gather() of all
-    # enabled adapters instead of a single blocking call — see the
-    # module docstring above for the shape that will take.
-    run_discord()
+async def main():
+    db = DatabaseManager()
+    auth = AuthManager(db)
+    memory = MemoryManager(db)
+    coins = CoinManager(db)
+    search_tool = SearchTool()
+    ai_handler = AIHandler(db, auth, memory, coins, search_tool)
+
+    tasks = []
+
+    discord_token = os.getenv('DISCORD_TOKEN')
+    if discord_token:
+        bot = discord_client.build_bot(db, auth, memory, coins, search_tool, ai_handler)
+        tasks.append(discord_client.start(bot, discord_token))
+        print("Discord adapter configured — starting.")
+    else:
+        print("DISCORD_TOKEN not set — Discord adapter disabled.")
+
+    telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
+    if telegram_token:
+        application = telegram_client.build_application(
+            db, auth, memory, coins, search_tool, ai_handler, telegram_token
+        )
+        tasks.append(telegram_client.start(application))
+        print("Telegram adapter configured — starting.")
+    else:
+        print("TELEGRAM_BOT_TOKEN not set — Telegram adapter disabled.")
+
+    if not tasks:
+        print(
+            "ERROR: No platform adapters are configured. Set DISCORD_TOKEN "
+            "and/or TELEGRAM_BOT_TOKEN in your .env file — Nebula has "
+            "nothing to run."
+        )
+        return
+
+    await asyncio.gather(*tasks)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

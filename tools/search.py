@@ -30,15 +30,10 @@ class SearchTool:
     VALID_PROVIDERS = ("google", "tavily")
 
     def __init__(self):
-        # Google credentials
         self.google_api_key = os.getenv('GOOGLE_SEARCH_API_KEY')
         self.google_engine_id = os.getenv('GOOGLE_SEARCH_ENGINE_ID')
-
-        # Tavily credentials
         self.tavily_api_key = os.getenv('TAVILY_API_KEY')
 
-        # Which provider the user wants (defaults to google for backwards
-        # compatibility with existing .env files that predate this feature)
         raw_provider = os.getenv('SEARCH_PROVIDER', 'google').strip().lower()
         if raw_provider not in self.VALID_PROVIDERS:
             print(
@@ -48,8 +43,6 @@ class SearchTool:
             raw_provider = 'google'
         self.provider = raw_provider
 
-        # Determine enabled/disabled state up front based on the selected
-        # provider's credentials only (no cross-provider fallback).
         self.enabled, self.disabled_reason = self._check_configuration()
 
         if self.enabled:
@@ -58,8 +51,6 @@ class SearchTool:
             print(f"WARNING: Search tool disabled - {self.disabled_reason}")
 
     def _check_configuration(self):
-        """Determine whether the currently selected provider is usable.
-        Returns (enabled: bool, reason: str | None)."""
         if self.provider == 'tavily':
             if self.tavily_api_key:
                 return True, None
@@ -67,7 +58,7 @@ class SearchTool:
                 "SEARCH_PROVIDER is set to 'tavily' but TAVILY_API_KEY is "
                 "missing. Set TAVILY_API_KEY in your .env file to enable search."
             )
-        else:  # google
+        else:
             if self.google_api_key and self.google_engine_id:
                 return True, None
             missing = []
@@ -81,13 +72,7 @@ class SearchTool:
                 f"{'it' if len(missing) == 1 else 'them'} in your .env file to enable search."
             )
 
-    # ------------------------------------------------------------------
-    # Provider-agnostic entry point
-    # ------------------------------------------------------------------
-
     async def perform_search(self, query: str, num_results: int = 5) -> str:
-        """Perform a web search using whichever provider is configured.
-        Callers don't need to know or care which provider is behind this."""
         if not self.enabled:
             return f"❌ Web search is currently disabled. {self.disabled_reason}"
 
@@ -98,10 +83,6 @@ class SearchTool:
                 return await self._search_google(query, num_results)
         except Exception as e:
             return f"❌ Error performing search: {str(e)}"
-
-    # ------------------------------------------------------------------
-    # Google Custom Search
-    # ------------------------------------------------------------------
 
     async def _search_google(self, query: str, num_results: int) -> str:
         params = {
@@ -125,16 +106,9 @@ class SearchTool:
             title = item.get('title', 'No title')
             link = item.get('link', '')
             snippet = item.get('snippet', 'No description')
-
-            results_text += f"**{i}. {title}**\n"
-            results_text += f"{snippet}\n"
-            results_text += f"🔗 {link}\n\n"
+            results_text += f"**{i}. {title}**\n{snippet}\n🔗 {link}\n\n"
 
         return results_text
-
-    # ------------------------------------------------------------------
-    # Tavily (AI-native search API)
-    # ------------------------------------------------------------------
 
     async def _search_tavily(self, query: str, num_results: int) -> str:
         headers = {
@@ -164,9 +138,6 @@ class SearchTool:
             title = item.get('title', 'No title')
             link = item.get('url', '')
             snippet = item.get('content', 'No description')
-
-            results_text += f"**{i}. {title}**\n"
-            results_text += f"{snippet}\n"
-            results_text += f"🔗 {link}\n\n"
+            results_text += f"**{i}. {title}**\n{snippet}\n🔗 {link}\n\n"
 
         return results_text

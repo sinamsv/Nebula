@@ -5,17 +5,25 @@ DISCORD_PLATFORM = "discord"
 
 
 class MessageListener(commands.Cog):
-    """Listens for messages that @mention the bot and hands them off to
-    the platform-agnostic AI handler.
+    """Listens for messages that should trigger Nebula and hands them off
+    to the platform-agnostic AI handler.
+
+    Two trigger conditions:
+    - Guild (server) channels: the bot must be @mentioned, unchanged
+      from before.
+    - DMs: ANY message triggers a response, no mention needed. DMs are
+      inherently 1:1 (or occasionally a small handful of participants),
+      so there's no ambiguity about who a message is "for" the way
+      there is in a busy server channel -- requiring a mention there
+      would just be friction.
 
     This cog is deliberately thin: its only job is translating between
-    discord.Message and the plain (text, display_name, nebula_user_id-
-    resolving IDs) interface that ai.handler.AIHandler.handle_turn()
-    expects, and then rendering the TurnResult it gets back as actual
-    Discord messages. No identity/coin/memory logic lives here — all of
-    that is inside ai/handler.py so a future Telegram message listener
-    can call the exact same handle_turn() and get the exact same
-    behavior.
+    discord.Message and the plain interface that
+    ai.handler.AIHandler.handle_turn() expects, and then rendering the
+    TurnResult it gets back as actual Discord messages. No identity/
+    coin/memory logic lives here -- all of that is inside ai/handler.py
+    so telegram_bot's message handler can call the exact same
+    handle_turn() and get the exact same behavior.
     """
 
     def __init__(self, bot):
@@ -25,9 +33,12 @@ class MessageListener(commands.Cog):
     async def on_message(self, message: discord.Message):
         if message.author == self.bot.user:
             return
-        if not message.guild:
-            return
-        if self.bot.user not in message.mentions:
+
+        is_dm = message.guild is None
+
+        # In a guild, only respond when explicitly @mentioned (unchanged).
+        # In a DM, always respond -- see class docstring.
+        if not is_dm and self.bot.user not in message.mentions:
             return
 
         context_message = None
@@ -37,10 +48,9 @@ class MessageListener(commands.Cog):
             except Exception:
                 pass
 
-        await self._handle_mention(message, context_message)
+        await self._handle_message(message, context_message)
 
-    async def _handle_mention(self, message: discord.Message, context_message: discord.Message = None):
-        # ⚠️ این بخش و خطوط پایینش تو‌رفتی نداشتن که اصلاح شد
+    async def _handle_message(self, message: discord.Message, context_message: discord.Message = None):
         ai_handler = self.bot.ai_handler
         if ai_handler is None:
             await message.channel.send(
@@ -48,6 +58,9 @@ class MessageListener(commands.Cog):
             )
             return
 
+        # Stripping the bot's own mention is a safe no-op when there's no
+        # mention present (the DM case), so no separate branch is needed
+        # here for is_dm.
         user_content = message.content.replace(f'<@{self.bot.user.id}>', '').strip()
 
         if context_message:
@@ -64,16 +77,18 @@ class MessageListener(commands.Cog):
             if image_urls:
                 user_content += f"\n\n[User attached {len(image_urls)} image(s)]"
 
-        # Typing indicator covers the whole "thinking" window: the model
-        # call itself, plus any tool execution (e.g. a search request)
-        # that happens inside handle_turn(). It stops the moment we exit
-        # this block and start sending real messages.
+        # DMChannel and TextChannel both implement .typing() via the
+        # Messageable base, so this works unchanged for both DMs and
+        # guild channels.
         async with message.channel.typing():
             result = await ai_handler.handle_turn(
                 source_platform=DISCORD_PLATFORM,
                 platform_user_id=str(message.author.id),
                 display_name=message.author.display_name,
                 message_text=user_content,
+                # None in DMs (message.guild is None there) -- moderation
+                # tools are automatically excluded in that case, see
+                # ai/handler.py's supports_guild_moderation.
                 discord_guild=message.guild,
             )
 
@@ -81,9 +96,6 @@ class MessageListener(commands.Cog):
             await self._send_long_message(message.channel, result.blocked_reason)
             return
 
-        # Tool output (e.g. search results) can exceed Discord's message
-        # length limit just as easily as the model's own reply — route it
-        # through the same chunking helper instead of a raw send().
         for tool_message in result.tool_messages:
             await self._send_long_message(message.channel, tool_message)
 
@@ -118,5 +130,4 @@ class MessageListener(commands.Cog):
 
 
 async def setup(bot):
-    """Setup function to load the cog."""
     await bot.add_cog(MessageListener(bot))

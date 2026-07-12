@@ -1,66 +1,71 @@
-# Nebula - AI-Powered Discord Admin Bot
+# Nebula - AI-Powered Multi-Platform Assistant
 
 ![Python Version](https://img.shields.io/badge/python-3.9+-blue)
 ![Discord.py](https://img.shields.io/badge/discord.py-2.3+-blue)
+![python-telegram-bot](https://img.shields.io/badge/python--telegram--bot-21+-blue)
 [![Documentation](https://img.shields.io/badge/Docs-Documentation-blue)](./DOCUMENTATION.md)
 [![Migration](https://img.shields.io/badge/Guide-Migration-orange)](./MIGRATION_GUIDE.md)
 [![License](https://img.shields.io/badge/License-MIT-green)](./LICENSE.txt)
 
-
-Nebula is an advanced AI-powered Discord bot built with Python and discord.py, featuring conversational AI capabilities, memory management, and comprehensive admin tools. Now fully migrated to Slash Commands for a modern, seamless experience.
+Nebula is an AI-powered assistant reachable from **Discord and Telegram**, sharing one account, one conversation memory, and one coin balance across whichever platform(s) you talk to it from. Ask it things, have it search the web, and — for admins on Discord — moderate your server, all through natural conversation.
 
 ## ✨ Features
 
 ### 🤖 AI-Powered Conversations
-- Natural language processing using **gemini-3.1-flash-lite**
-- High efficiency with near-zero hallucination rates
-- Context-aware responses that remember previous conversations
-- Addresses users by their display names for personal engagement
-- Handles replies to messages intelligently
+- Natural language processing, model configurable via `AI_MODEL` (OpenAI-compatible: OpenAI, Gemini, and other providers)
+- Context-aware responses that remember previous conversations — **across platforms**, not just within one
+- Addresses users by their display name for personal engagement
+- Handles replies to messages intelligently, on both Discord and Telegram
+
+### 🌍 Multi-Platform, One Account
+- **Discord**: mention the bot in a server channel, or just DM it directly — no mention needed in DMs.
+- **Telegram**: message it directly in a private chat, or `@mention` it in a group.
+- **One Nebula account, everywhere**: sign up once, then link additional platforms with `/sync` (see below) instead of creating a separate account per platform.
+- Admin status, memory, and coin balance are all properties of your **Nebula account**, not any single platform.
+
+### 🔗 Cross-Platform Account Linking (`/sync` + `/verify`)
+Already have a Nebula account on Discord and want to use Telegram too (or vice versa)?
+1. On Discord: `/sync platform:telegram username:<your Nebula username>` — you'll get a one-time code.
+2. On Telegram: message the bot `/start` if you haven't already, then send `/verify username:<your Nebula username> code:<the code>`.
+3. Done — your memory and coin balance now carry over to Telegram too.
+
+Codes expire after 10 minutes and can only be used once. The direction is deliberately Discord → Telegram (not the reverse): Telegram won't let a bot message someone who hasn't messaged it first, so the code has to be carried over by you rather than delivered automatically.
+
+### 👤 Accounts & Approval
+- `/signup` to create a Nebula account (on either platform) — pending admin approval by default.
+- `/login` to link an existing account to a new platform identity directly (an alternative to `/sync` if you'd rather just re-enter your password on the new platform).
+- The very first admin account is created via a one-time `ADMIN_BOOTSTRAP_KEY` (see Installation below); every admin after that is promoted with `/add_admin` on Discord.
 
 ### 💾 Memory Management
-- SQLite database for conversation history
-- 400,000 token memory capacity
-- Automatic memory reset when limit is reached
-- Tracks individual users while maintaining shared conversation context
-- Admin commands for monitoring and resetting memory
+- SQLite-backed conversation history, scoped to your Nebula account (not to a Discord channel or Telegram chat)
+- 200,000 token capacity per account; new messages are refused with a clear message once full, rather than being silently dropped or auto-wiped
+- `/memory_stats` and `/memory_reset` — available to any approved user, and apply to their own memory only
 
 ### 🌝 Nebula Coin System (Rate Limiting)
-An elegant rate-limiting system designed to prevent spam and optimize hosting costs:
-- **Starting Balance**: Every user starts with **10 coins** per guild.
-- **Consumption**:
-  - **1 coin** per AI message response.
-  - **2 coins** per web search.
-- **Automatic Reset**: Balance resets back to 10 (does not stack) every **8 hours**.
-- **Transparency**: Users can check their budget at any time.
-- **Admin Control**: Administrators can manually grant or set coin balances for users.
+- **Starting Balance**: every account starts with **10 coins**, shared globally (not per-guild, per-chat, or per-platform).
+- **Consumption**: 1 coin per AI message, 2 coins per web search.
+- **Automatic Reset**: back to 10 (non-stacking) every 8 hours.
+- `/coin` to check your balance; `/add_coin` (Discord, admin-only) to grant or set someone's balance.
 
 ### 🔍 Web Search Integration
-- Google Custom Search API integration
-- Available to all users (costs 2 Nebula Coins)
-- Returns formatted search results with links
+- Google Custom Search or Tavily (an AI-native search API) — pick one via `SEARCH_PROVIDER`
+- Available to all approved users, costs 2 Nebula Coins
+- If the selected provider is misconfigured, search is disabled entirely (no silent fallback to the other provider) and admins are notified
 
-### 🛡️ Admin Tools (Administrator-Only)
-- **Kick User**: Remove members from the server via AI request
-- **Ban User**: Permanently ban members via AI request
-- **Create Channel**: Create text or voice channels in specified categories via AI request
-- **User Activity Check**: View detailed user activity statistics
-- **Admin Logs**: Track all moderation actions via `/admin_logs`
-- **Resource Control**: Manage server resource consumption via the Coin System
-
-### 📊 Features
-- Automatic message splitting for long responses (>2000 characters)
-- Image attachment detection
-- Reply context awareness
-- Comprehensive logging system
-- Full Slash Command support
+### 🛡️ Admin Tools (Discord Only, Administrator-Only)
+Kick, ban, and channel creation are inherently Discord Guild operations with no Telegram equivalent, so these stay Discord-only:
+- **Kick / Ban User** via natural-language AI request
+- **Create Channel** (text or voice, optionally inside a category) via AI request
+- **User Activity Check**: cross-platform account activity and memory usage for any linked user
+- **Admin Logs**: `/admin_logs` — every admin action, across both platforms, in one log
+- **Account Approval**: `/approve_user`, `/pending_users`, `/add_admin` — admin status is Nebula-level, so promoting someone applies everywhere they're linked
 
 ## 📋 Prerequisites
 
 - Python 3.9 or higher
-- Discord Bot Token
+- A Discord Bot Token, a Telegram Bot Token, or both (at least one is required)
 - OpenAI-compatible API Key (e.g., Google AI Studio, OpenAI, Liara.ir)
-- Google Custom Search API Key (optional, for search functionality)
+- Google Custom Search or Tavily API key (optional, for search functionality)
 
 ## 🚀 Installation
 
@@ -84,178 +89,193 @@ pip install -r requirements.txt
 cp .env.sample .env
 ```
 
-2. Edit `.env` and fill in your credentials:
+2. Edit `.env` and fill in your credentials. At minimum, you need `OPENAI_API_KEY`, `AI_MODEL`, `ADMIN_BOOTSTRAP_KEY`, and **at least one** of `DISCORD_TOKEN` / `TELEGRAM_BOT_TOKEN`:
 
 ```env
 DISCORD_TOKEN=your_discord_bot_token_here
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 OPENAI_API_KEY=your_api_key_here
 OPENAI_BASE_URL=  # Optional: e.g., https://generativelanguage.googleapis.com/v1beta/openai/
-AI_MODEL=google/gemini-3.1-flash-lite
-GOOGLE_SEARCH_API_KEY=your_google_search_api_key_here
-GOOGLE_SEARCH_ENGINE_ID=your_search_engine_id_here
+AI_MODEL=google/gemini-2.0-flash-001
+ADMIN_BOOTSTRAP_KEY=  # generate per the instructions in .env.sample
 ```
 
 ### 4. Get Your API Keys
 
 #### Discord Bot Token:
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
-2. Create a new application
-3. Go to the "Bot" section
-4. Click "Reset Token" and copy your bot token
-5. Enable these Privileged Gateway Intents:
-   - Server Members Intent
-   - Message Content Intent
+2. Create a new application → "Bot" section → "Reset Token" and copy it
+3. Enable these Privileged Gateway Intents: Server Members Intent, Message Content Intent
 
-#### AI API Key (Gemini):
-1. Go to [Google AI Studio](https://aistudio.google.com/)
-2. Create a new API key
-3. Copy the key into `OPENAI_API_KEY` in `.env`
-4. Set `OPENAI_BASE_URL` to `https://generativelanguage.googleapis.com/v1beta/openai/`
+#### Telegram Bot Token:
+1. Open a chat with [@BotFather](https://t.me/BotFather) on Telegram
+2. Send `/newbot` and follow the prompts (choose a name and a username ending in `bot`)
+3. BotFather gives you a token that looks like `123456789:AAExampleTokenTextGoesHere` — copy it into `TELEGRAM_BOT_TOKEN`
 
-#### Google Custom Search (Optional):
-1. Get API Key: [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
-2. Get Search Engine ID: [Programmable Search Engine](https://programmablesearchengine.google.com/)
+You don't need both — set whichever platform(s) you actually want to run. Nebula starts every adapter it has a token for and skips the rest.
+
+#### AI API Key (Gemini example):
+1. Go to [Google AI Studio](https://aistudio.google.com/), create an API key
+2. Copy it into `OPENAI_API_KEY`, and set `OPENAI_BASE_URL` to `https://generativelanguage.googleapis.com/v1beta/openai/`
+
+#### Google Custom Search / Tavily (Optional):
+- Google: [API Key](https://console.cloud.google.com/apis/credentials) + [Search Engine ID](https://programmablesearchengine.google.com/)
+- Tavily: get a key at [app.tavily.com](https://app.tavily.com/)
 
 ### 5. Customize System Prompt (Optional)
 
-Edit `system.txt` to customize Nebula's personality and behavior.
+Edit `system.txt` to customize Nebula's personality and behavior — shared across both platforms.
 
-### 6. Run the Bot
+### 6. Run Nebula
 
 ```bash
-python bot.py
+python main.py
 ```
+
+This starts every adapter you've configured a token for, concurrently. Check the console output to confirm which one(s) came up.
 
 ## 🎯 Usage
 
 ### Talking to Nebula
 
-Simply mention the bot in any message to start a conversation:
-
+**Discord:**
 ```
 @Nebula what's the weather like?
-@Nebula can you help me understand this concept?
+```
+Or just DM the bot directly — no mention needed there:
+```
+[in a DM] what's the weather like?
 ```
 
-Nebula also understands context when you mention it in a reply:
+**Telegram:**
 ```
-[Reply to a message] @Nebula can you explain this?
+[in a private chat with the bot] what's the weather like?
 ```
-*Note: Each response costs 1 Nebula Coin.*
+Or, in a group, `@mention` it the same way you would on Discord:
+```
+@YourBotUsername what's the weather like?
+```
+
+Both platforms understand replies: reply to a message and mention/message Nebula, and it'll see what you replied to as context.
+
+*Note: each response costs 1 Nebula Coin, shared across whichever platform(s) you use.*
 
 ### Web Search
 
-Ask Nebula to search for information:
+Ask Nebula to search for information on either platform:
 ```
 @Nebula search for the latest AI news
 ```
-Or use the direct slash command:
+Or on Discord, use the direct prefix command:
 ```
-/search query: Python best practices
+!search Python best practices
 ```
-*Note: Each search costs 2 Nebula Coins.*
+*Note: each search costs 2 Nebula Coins.*
 
-### Slash Commands
+### Commands
 
-#### For Users
-- `/coin`: Show your current Nebula Coin balance and time until reset.
-- `/search query:<text>`: Perform a web search using Google Custom Search.
+#### Discord (Slash Commands)
+| Command | Who | Description |
+|---|---|---|
+| `/signup` | Anyone | Create a Nebula account, linked to this Discord identity |
+| `/login` | Anyone | Link this Discord identity to an existing Nebula account |
+| `/sync` | Approved users | Generate a code to link another platform to this account |
+| `/coin` | Approved users | Show your Nebula Coin balance |
+| `/memory_stats` / `/memory_reset` | Approved users | View or clear your own memory |
+| `/add_coin` | Admin | Add to or set a user's coin balance |
+| `/approve_user` / `/pending_users` / `/add_admin` | Admin | Account approval and admin management |
+| `/admin_logs` | Admin | View recent admin action logs |
 
-#### For Administrators Only
-- `/add_coin member:@user amount:<number> mode:<add|set>`: Modify a user's Nebula Coin balance.
-- `/admin_logs limit:<number>`: View recent administrative action logs.
-- `/memory_stats`: Show memory usage statistics for the current channel.
-- `/reset_memory`: Clear conversation memory for the current channel.
+#### Telegram
+| Command | Who | Description |
+|---|---|---|
+| `/start` | Anyone | Get started / see available commands |
+| `/signup username:<n> password:<p>` | Anyone | Create a Nebula account, linked to this Telegram identity |
+| `/login username:<n> password:<p>` | Anyone | Link this Telegram identity to an existing Nebula account |
+| `/verify username:<n> code:<c>` | Anyone | Complete a `/sync` started on Discord |
+| `/coin` | Approved users | Show your Nebula Coin balance |
+| `/memory_stats` / `/memory_reset` | Approved users | View or clear your own memory |
+| `/add_coin username:<n> amount:<a> mode:<add\|set>` | Admin | Add to or set a user's coin balance |
 
-### AI-Powered Admin Tools (Administrators Only)
+Admin moderation and account-approval commands (kick, ban, create channel, `/approve_user`, `/add_admin`, `/admin_logs`) are Discord-only today.
 
-You can perform moderation tasks by simply asking Nebula while mentioning it:
+### AI-Powered Admin Tools (Discord, Administrators Only)
 
-#### Kick a User
 ```
 @Nebula kick @username for spamming
-```
-
-#### Ban a User
-```
 @Nebula ban @username for violating rules
-```
-
-#### Create a Channel
-```
 @Nebula create a text channel called "general-chat" in the "Community" category
-```
-
-#### Check User Activity
-```
 @Nebula check activity for @username
 ```
 
 ## 🏗️ Project Structure
 
 ```
-nebula-bot/
-├── bot.py                 # Main bot file
-├── database.py            # Database management
-├── system.txt            # AI system prompt
-├── requirements.txt      # Python dependencies
-├── .env.sample          # Environment variables template
-├── cogs/
-│   ├── ai_handler.py    # AI message processing
-│   ├── admin_tools.py   # Admin moderation tools
-│   ├── search_tool.py   # Google Search integration
-│   ├── memory_manager.py # Memory and token management
-│   └── coin_manager.py   # Nebula Coin system
-└── nebula.db            # SQLite database (created on first run)
+nebula/
+├── main.py                    # Launcher: builds shared core instances, runs every configured adapter
+├── system.txt                 # AI system prompt (shared across platforms)
+├── requirements.txt
+├── .env.sample
+├── core/                      # Platform-agnostic business logic
+│   ├── database.py            #   SQLite layer: nebula_users, platform_identities, memory, coins, sync codes, admin log
+│   ├── auth.py                #   Signup/login/approval + cross-platform account sync
+│   ├── memory.py              #   Per-account conversation memory (200k token cap)
+│   └── coins.py               #   Nebula Coin balance/spend/reset logic
+├── ai/
+│   └── handler.py             # Platform-agnostic conversation turn handling (model calls, tool dispatch)
+├── tools/                     # AI-callable tools
+│   ├── search.py               #   Platform-agnostic (Google / Tavily)
+│   └── moderation.py           #   Discord-only (kick/ban/create_channel need a discord.Guild)
+├── discord_bot/                # Discord adapter (thin — wraps core/ai/tools for Discord)
+│   ├── client.py
+│   ├── auth_commands.py, sync_commands.py, coin_commands.py, memory_commands.py, admin_commands.py
+│   ├── search_command.py
+│   └── message_listener.py
+└── telegram_bot/                # Telegram adapter (thin — wraps the exact same core/ai/tools)
+    ├── client.py
+    ├── auth_handlers.py, coin_handlers.py, memory_handlers.py
+    ├── message_handler.py
+    └── utils.py
 ```
 
 ## 🗄️ Database Schema
 
-### conversation_history
-Stores all conversation messages with token counts.
+Schema is organized around **Nebula accounts**, not guilds or channels — this is what makes cross-platform identity, memory, and coin balances work.
 
-### user_profiles
-Tracks user information and activity statistics.
-
-### coin_balances
-Tracks user coin balances and reset timestamps per guild.
-
-### server_settings
-Stores server-specific configuration.
-
-### admin_actions_log
-Logs all administrative actions for audit purposes.
+| Table | Purpose |
+|---|---|
+| `nebula_users` | A Nebula account: username, password hash, display name, admin/approval status |
+| `platform_identities` | Links a platform-specific ID (Discord user ID, Telegram user ID) to a `nebula_user_id`. One account can have many platform identities. |
+| `platform_sync_codes` | One-time codes for the `/sync` → `/verify` account-linking flow |
+| `conversation_history` | Memory, scoped to `nebula_user_id` (tagged with which platform each message originated on, but not scoped by it) |
+| `coin_balances` | Nebula Coin balance and reset timer, per `nebula_user_id`, global across platforms |
+| `admin_actions_log` | Every admin action, across both platforms |
+| `bootstrap_state` | Tracks whether the one-time `ADMIN_BOOTSTRAP_KEY` has been claimed |
+| `server_settings` | Discord-specific, legacy per-guild settings |
 
 ## ⚙️ Configuration
 
 ### Memory Management
-- **Max Tokens**: 400,000 tokens
-- **Auto-Reset**: Automatically resets when limit is reached
-- **Token Counting**: Uses tiktoken for accurate token counting
+- **Max Tokens**: 200,000 tokens per Nebula account
+- **Hard cap, not auto-reset**: once full, new AI turns are refused with a message pointing to `/memory_reset`, rather than silently wiping history
+- **Token Counting**: `tiktoken`
 
 ### AI Configuration
-- **Model**: google/gemini-3.1-flash-lite (Recommended for efficiency and accuracy)
+- **Model**: set via `AI_MODEL` (any OpenAI-compatible model string)
 - **Temperature**: 0.7
 - **Max Tokens**: 2000 per response
-- **Custom Base URL**: Supports OpenAI-compatible APIs
+- **Custom Base URL**: supports OpenAI-compatible APIs via `OPENAI_BASE_URL`
 
 ### Message Handling
-- **Max Message Length**: 2000 characters (Discord limit)
-- **Auto-Split**: Long messages are automatically split
-- **Reply Context**: Includes replied-to messages in context
+- **Discord**: 2000-character limit, auto-split into multiple messages when exceeded
+- **Telegram**: 4096-character limit, same auto-split behavior
+- **Reply Context**: both platforms include the replied-to message in context when available
 
 ## 🔒 Permissions Required
 
-The bot needs the following Discord permissions:
-- Read Messages/View Channels
-- Send Messages
-- Manage Messages
-- Embed Links
-- Read Message History
-- Mention Everyone (for admin tools)
-- Kick Members (for kick tool)
-- Ban Members (for ban tool)
-- Manage Channels (for create channel tool)
+**Discord**, the bot needs: Read Messages/View Channels, Send Messages, Manage Messages, Embed Links, Read Message History, Kick Members, Ban Members, Manage Channels.
+
+**Telegram**, no special bot permissions are needed for private chats. For group use, the bot should be able to read messages in the group (disable Privacy Mode via BotFather's `/setprivacy` if you want it to see messages it isn't directly replying to or mentioned in).
 
 ## 🤝 Contributing
 

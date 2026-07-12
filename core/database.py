@@ -35,8 +35,6 @@ class DatabaseManager:
         # Identity
         # ------------------------------------------------------------
 
-        # A Nebula account. This is the thing memory, coins, and admin
-        # status actually belong to — platforms are just doors into it.
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS nebula_users (
                 nebula_user_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,10 +49,6 @@ class DatabaseManager:
             )
         ''')
 
-        # Links a platform-specific identity (Discord user ID, Telegram user
-        # ID, ...) to a Nebula account. One Nebula account can have many
-        # platform identities; a platform identity maps to exactly one
-        # Nebula account.
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS platform_identities (
                 platform TEXT NOT NULL,
@@ -63,6 +57,30 @@ class DatabaseManager:
                 platform_display_name TEXT,
                 linked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (platform, platform_user_id)
+            )
+        ''')
+
+        # ------------------------------------------------------------
+        # Cross-platform account linking (sync codes)
+        # ------------------------------------------------------------
+        # Supports the /sync (Discord) -> /verify (Telegram, or any future
+        # platform) flow: an already-approved, already-linked account
+        # generates a one-time code on ITS platform, then carries that
+        # code to the NEW platform to prove ownership. This direction
+        # (issue-then-carry) exists because a fresh platform identity has
+        # no way to be messaged first — Telegram in particular refuses to
+        # let a bot message a user_id it hasn't received a message FROM
+        # yet, so the "other bot DMs you a code" direction some platforms
+        # support isn't universally available. Discord-issues-code,
+        # user-carries-it-to-Telegram works regardless of platform.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS platform_sync_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nebula_user_id INTEGER NOT NULL REFERENCES nebula_users(nebula_user_id),
+                target_platform TEXT NOT NULL,
+                code TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                consumed INTEGER NOT NULL DEFAULT 0
             )
         ''')
 
@@ -150,8 +168,6 @@ class DatabaseManager:
     # ------------------------------------------------------------------
 
     def create_user(self, username: str, password_hash: str, display_name: str) -> Optional[int]:
-        """Create a new Nebula account. Returns the new nebula_user_id, or
-        None if the username is already taken."""
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
@@ -161,8 +177,6 @@ class DatabaseManager:
             ''', (username, password_hash, display_name))
             nebula_user_id = cursor.lastrowid
 
-            # Every new user gets a coin balance row up front so downstream
-            # coin logic never has to special-case "row doesn't exist yet".
             cursor.execute('''
                 INSERT INTO coin_balances (nebula_user_id, balance, last_reset)
                 VALUES (?, 10, CURRENT_TIMESTAMP)
@@ -235,11 +249,6 @@ class DatabaseManager:
         return changed
 
     def list_pending_users(self, limit: int = 25) -> List[Dict]:
-        """Users who signed up but are not yet approved (nor rejected-and-
-        left pending forever — rejection is just leaving is_approved=0).
-        Ordered by nebula_user_id rather than created_at for the same
-        reason as get_conversation_history: CURRENT_TIMESTAMP's
-        second-level precision can tie for near-simultaneous signups."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -261,11 +270,6 @@ class DatabaseManager:
     # ------------------------------------------------------------------
 
     def try_claim_bootstrap(self, nebula_user_id: int) -> bool:
-        """Atomically claim the one-time bootstrap slot. Returns True if
-        this call was the one that claimed it, False if it was already
-        claimed by someone else. Callers must independently verify the
-        API key matches before calling this — this only enforces
-        single-use, not correctness of the key."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -292,11 +296,6 @@ class DatabaseManager:
 
     def link_platform_identity(self, platform: str, platform_user_id: str,
                                 nebula_user_id: int, platform_display_name: str = None) -> bool:
-        """Link a platform identity to a Nebula account. Fails (returns
-        False) if that exact platform identity is already linked to a
-        DIFFERENT Nebula account — one Discord ID can't belong to two
-        Nebula accounts. Re-linking to the SAME account (e.g. re-login)
-        is idempotent and succeeds."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -339,6 +338,70 @@ class DatabaseManager:
         }
 
     # ------------------------------------------------------------------
+    # Cross-platform account linking (sync codes)
+    # ------------------------------------------------------------------
+
+    def create_sync_code(self, nebula_user_id: int, target_platform: str, code: str):
+        """Store a new sync code. Any prior UNCONSUMED code for this exact
+        (nebula_user_id, target_platform) pair is invalidated first (marked
+        consumed), so at most one code is ever "live" at a time — a user
+        who runs /sync twice by mistake doesn't end up wondering which of
+        two codes is the current one; only the newest is valid."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE platform_sync_codes SET consumed = 1
+            WHERE nebula_user_id = ? AND target_platform = ? AND consumed = 0
+        ''', (nebula_user_id, target_platform))
+        cursor.execute('''
+            INSERT INTO platform_sync_codes (nebula_user_id, target_platform, code)
+            VALUES (?, ?, ?)
+        ''', (nebula_user_id, target_platform, code))
+        conn.commit()
+        conn.close()
+
+    def get_valid_sync_code(self, nebula_user_id: int, target_platform: str,
+                             expiry_minutes: int) -> Optional[Dict]:
+        """Return the most recent unconsumed sync code for this
+        (nebula_user_id, target_platform) pair, or None if there isn't
+        one or it has expired. Elapsed-time expiry check follows the same
+        pattern as _maybe_reset's coin-balance-reset logic below, for the
+        same second-level-precision reasons noted on get_conversation_history."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, code, created_at FROM platform_sync_codes
+            WHERE nebula_user_id = ? AND target_platform = ? AND consumed = 0
+            ORDER BY id DESC LIMIT 1
+        ''', (nebula_user_id, target_platform))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+
+        sync_id, code, created_at = row
+        if isinstance(created_at, str):
+            try:
+                created_dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                created_dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S.%f')
+        else:
+            created_dt = created_at
+
+        elapsed = datetime.utcnow() - created_dt
+        if elapsed.total_seconds() > expiry_minutes * 60:
+            return None
+
+        return {'id': sync_id, 'code': code, 'created_at': created_at}
+
+    def consume_sync_code(self, sync_code_id: int):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE platform_sync_codes SET consumed = 1 WHERE id = ?', (sync_code_id,))
+        conn.commit()
+        conn.close()
+
+    # ------------------------------------------------------------------
     # Conversation memory (per nebula_user_id, cross-platform)
     # ------------------------------------------------------------------
 
@@ -355,16 +418,6 @@ class DatabaseManager:
         conn.close()
 
     def get_conversation_history(self, nebula_user_id: int, limit: int = 50) -> List[Dict]:
-        # Ordered by `id`, not `timestamp`: CURRENT_TIMESTAMP has only
-        # second-level precision in SQLite, so multiple messages inserted
-        # within the same second (very plausible here — an assistant
-        # reply followed immediately by the next user message, or two
-        # platforms both writing around the same moment) can get an
-        # identical timestamp, making ORDER BY timestamp non-deterministic
-        # for ties. `id` is AUTOINCREMENT and strictly monotonic, so it's
-        # the reliable ordering key. The inner query grabs the most recent
-        # `limit` rows by id descending, then the outer query re-sorts
-        # those to ascending (chronological) order for the caller.
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -421,9 +474,6 @@ class DatabaseManager:
         conn.close()
 
     def get_admin_logs(self, limit: int = 50) -> List[Dict]:
-        # Ordered by id (not timestamp) for the same reason as
-        # get_conversation_history — avoids non-deterministic ordering
-        # when multiple admin actions land in the same second.
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
