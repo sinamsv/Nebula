@@ -58,6 +58,10 @@ class AIHandler:
     used to also be a discord.py Cog before it was extracted to core/.
     """
 
+    # Safety cap on the tool-calling round-trip loop in handle_turn() --
+    # see the comment there for what this prevents.
+    MAX_TOOL_ROUNDS = 5
+
     def __init__(self, db: DatabaseManager, auth: AuthManager, memory: MemoryManager,
                  coin_manager, search_tool: SearchTool):
         self.db = db
@@ -221,21 +225,56 @@ class AIHandler:
             result.blocked_reason = "Sorry, the AI backend isn't configured right now."
             return result
 
-        try:
-            response = await self._call_openai(messages, is_admin, supports_guild_moderation)
-        except Exception as e:
-            print(f"Error calling AI backend: {e}")
-            result.blocked_reason = f"Sorry {display_name}, I encountered an error processing your message. Please try again."
-            return result
-
         usage_after_user_msg = await self.memory.add_message_to_memory(
             nebula_user_id, "user", message_text, source_platform
         )
 
-        choice = response.choices[0]
-        response_message = choice.message
+        # Bounded tool-calling loop. Bug fixed here: previously, after a
+        # tool call was executed, the model was never called AGAIN with
+        # the tool's output -- so it could never actually see or
+        # synthesize a reply from what the tool returned. On a standard
+        # tool-calling response, response_message.content is None (the
+        # model hasn't produced a final answer yet, only a request to
+        # call a tool), so the old code's `if response_message.content:`
+        # check silently skipped storing ANY assistant reply for that
+        # turn. Depending on the provider, either nothing got stored
+        # (leaving a dangling, unanswered user turn in memory) or,
+        # for providers that don't cleanly separate tool_calls from
+        # content, whatever partial/premature text WAS present got
+        # stored verbatim -- and then got replayed on every subsequent
+        # turn, which is what produced the "repeats the search result
+        # regardless of topic" symptom: a smaller model, weaker at
+        # steering around unusual/malformed prior context, latched onto
+        # that stored text and kept reproducing it.
+        #
+        # The fix: after executing a tool call, append the assistant's
+        # tool-calling message (with its tool_calls field intact) plus a
+        # matching role="tool" message per call, and ask the model AGAIN.
+        # Capped at MAX_TOOL_ROUNDS so a model that keeps requesting
+        # tools can't loop forever -- nothing in the current toolset
+        # (search, kick, ban, create_channel, user_activity_check)
+        # legitimately needs more than a couple of rounds in one turn.
+        final_content = None
+        for _ in range(self.MAX_TOOL_ROUNDS):
+            try:
+                response = await self._call_openai(messages, is_admin, supports_guild_moderation)
+            except Exception as e:
+                print(f"Error calling AI backend: {e}")
+                result.blocked_reason = f"Sorry {display_name}, I encountered an error processing your message. Please try again."
+                return result
 
-        if response_message.tool_calls:
+            response_message = response.choices[0].message
+
+            if not response_message.tool_calls:
+                final_content = response_message.content
+                break
+
+            # Preserve the assistant's tool_calls message exactly as the
+            # model sent it -- the follow-up role="tool" messages must
+            # reference a tool_call_id that appeared in a preceding
+            # assistant message, or the API will reject the next call.
+            messages.append(response_message.model_dump(exclude_unset=True))
+
             for tool_call in response_message.tool_calls:
                 function_name = tool_call.function.name
                 function_args = json.loads(tool_call.function.arguments)
@@ -245,11 +284,20 @@ class AIHandler:
                 )
                 if tool_result:
                     result.tool_messages.append(tool_result)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": tool_result or "(tool returned no output)",
+                })
+        # (no `else` needed: if the loop exhausts MAX_TOOL_ROUNDS without
+        # ever hitting `break`, final_content simply stays None -- the
+        # user still sees whatever tool_messages were collected along
+        # the way, just without a final synthesized wrap-up on top.)
 
-        if response_message.content:
-            result.reply_text = response_message.content
+        if final_content:
+            result.reply_text = final_content
             await self.memory.add_message_to_memory(
-                nebula_user_id, "assistant", response_message.content, source_platform
+                nebula_user_id, "assistant", final_content, source_platform
             )
 
         result.memory_warning = self.memory.approaching_full_warning(usage_after_user_msg)
