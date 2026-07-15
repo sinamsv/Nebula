@@ -1,0 +1,30 @@
+name: nebula
+
+services:
+  nebula:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # For local dev, build from source. To instead run the published
+    # image from GHCR, comment out `build:` above and uncomment:
+    # image: ghcr.io/sinamsv/nebulabot:latest
+    container_name: nebula
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Named volume: persists nebula.db across container
+      # recreates/rebuilds without relying on a host path. Mounted at
+      # /app/data (a subdirectory, not /app itself) so a rebuild that
+      # changes app code never risks the volume mount shadowing it —
+      # only ./data needs to survive rebuilds/upgrades.
+      - nebula-data:/app/data
+    environment:
+      # Requires main.py to read DB_PATH via os.getenv() — see
+      # main.py.patch. Without that one-line change, SQLite falls back
+      # to ./nebula.db inside the container's ephemeral filesystem and
+      # this volume mount has nothing to actually persist.
+      - DB_PATH=/app/data/nebula.db
+
+volumes:
+  nebula-data:

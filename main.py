@@ -39,7 +39,12 @@ import telegram_bot.client as telegram_client
 
 
 async def main():
-    db = DatabaseManager()
+    # DB_PATH lets the Docker image point nebula.db at a mounted volume
+    # (see docker-compose.yml's DB_PATH=/app/data/nebula.db) instead of
+    # the container's ephemeral filesystem. Defaults to "nebula.db"
+    # (relative to CWD), unchanged from before, for anyone running
+    # main.py directly outside Docker.
+    db = DatabaseManager(db_path=os.getenv('DB_PATH', 'nebula.db'))
     auth = AuthManager(db)
     memory = MemoryManager(db)
     coins = CoinManager(db)

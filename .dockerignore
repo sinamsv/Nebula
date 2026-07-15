@@ -1,0 +1,30 @@
+# Secrets / local state — never bake these into the image
+.env
+nebula.db
+*.db
+
+# VCS / CI
+.git
+.github
+
+# Python cruft
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Docs (not needed at runtime, keeps image/context smaller)
+*.md
+LICENSE.txt
+
+# Tests (not needed in the runtime image)
+test_*.py
+tests/
