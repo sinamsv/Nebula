@@ -76,6 +76,37 @@ def build_application(db: DatabaseManager, auth: AuthManager, memory: MemoryMana
     return application
 
 
+async def _notify_admins_if_ai_unconfigured(application: Application, db: DatabaseManager,
+                                             ai_handler: AIHandler):
+    """Unlike discord_bot/client.py's equivalent, this uses a direct
+    database lookup (DatabaseManager.list_admin_platform_identities)
+    rather than iterating any container of "known chats" -- Telegram has
+    no "shared server" precondition for DMing a user the way Discord
+    does. Any admin who has ever linked their Telegram identity (which
+    requires having sent the bot at least one command already, since
+    that's how linking happens in the first place -- see
+    telegram_bot/auth_handlers.py) can be messaged directly by chat_id,
+    with no need to first discover them via a shared group/channel.
+
+    Runs once, after polling has started (so send calls have a live
+    connection to work with) -- called from start() below, not
+    build_application(), since build_application() only constructs the
+    Application and doesn't yet have a running bot connection to send
+    through.
+    """
+    notice = ai_handler.get_admin_notice_if_unconfigured()
+    if notice is None:
+        return
+
+    admins = db.list_admin_platform_identities(TELEGRAM_PLATFORM)
+    for admin in admins:
+        try:
+            await application.bot.send_message(chat_id=admin['platform_user_id'], text=notice)
+        except Exception as e:
+            name = admin['platform_display_name'] or admin['display_name']
+            print(f"Failed to message admin {name} about AI misconfiguration: {e}")
+
+
 async def start(application: Application):
     """Async-friendly entry point for main.py's asyncio.gather().
 
@@ -96,6 +127,17 @@ async def start(application: Application):
     await application.start()
     await application.updater.start_polling()
     print("Telegram adapter connected and polling for updates.")
+
+    # Runs once per start() call (i.e. once per process run, not
+    # per-reconnect the way discord_bot/client.py's on_ready-triggered
+    # version can technically re-fire on a Discord reconnect) -- PTB's
+    # start_polling() itself handles reconnects internally without
+    # re-invoking start(), so no extra "already sent" guard is needed
+    # here the way discord_bot/client.py needs bot._ai_admin_notice_sent
+    # for its on_ready-triggered version.
+    db = application.bot_data['db']
+    ai_handler = application.bot_data['ai_handler']
+    await _notify_admins_if_ai_unconfigured(application, db, ai_handler)
 
     try:
         # start_polling() runs in the background and returns immediately;

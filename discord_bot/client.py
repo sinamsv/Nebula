@@ -45,6 +45,15 @@ def build_bot(db: DatabaseManager, auth: AuthManager, memory: MemoryManager,
     # it's core.coins.CoinManager, constructed alongside everything else
     # in main.py before any adapter even starts).
     bot.ai_handler = ai_handler
+    # Instance-level, Discord-only flag -- mirrors
+    # discord_bot/search_command.py's SearchCommand._admin_notice_sent.
+    # Deliberately NOT tracked on AIHandler itself (see
+    # AIHandler.get_admin_notice_if_unconfigured()'s docstring): each
+    # adapter owns its own "have I already told MY admins" state, since
+    # Discord admins and Telegram admins are two separate audiences and
+    # neither platform starting first should suppress the other's
+    # notification.
+    bot._ai_admin_notice_sent = False
 
     @bot.event
     async def on_ready():
@@ -69,6 +78,8 @@ def build_bot(db: DatabaseManager, auth: AuthManager, memory: MemoryManager,
         if search_tool_cog:
             await search_tool_cog.notify_admins_if_disabled()
 
+        await _notify_admins_if_ai_unconfigured(bot)
+
     @bot.event
     async def on_message(message):
         if message.author == bot.user:
@@ -78,6 +89,40 @@ def build_bot(db: DatabaseManager, auth: AuthManager, memory: MemoryManager,
         pass
 
     return bot
+
+
+async def _notify_admins_if_ai_unconfigured(bot: commands.Bot):
+    """Mirrors discord_bot/search_command.py's SearchCommand.
+    notify_admins_if_disabled() exactly: iterate every guild's members
+    (not a direct database lookup) because Discord bots can only DM a
+    user they share at least one guild with -- there is no way to
+    resolve "all linked Discord admins" straight from the database the
+    way telegram_bot/client.py's equivalent function can (see that
+    file), since a shared-guild precondition doesn't apply on Telegram.
+    Runs once per on_ready (guarded by bot._ai_admin_notice_sent), so a
+    reconnect doesn't re-spam admins who were already notified.
+    """
+    notice = bot.ai_handler.get_admin_notice_if_unconfigured()
+    if notice is None or bot._ai_admin_notice_sent:
+        return
+
+    bot._ai_admin_notice_sent = True
+
+    notified_discord_ids = set()
+    for guild in bot.guilds:
+        for member in guild.members:
+            if member.bot or member.id in notified_discord_ids:
+                continue
+            identity = bot.auth.resolve_identity(DISCORD_PLATFORM, str(member.id))
+            if not identity or not identity['is_admin']:
+                continue
+            notified_discord_ids.add(member.id)
+            try:
+                await member.send(notice)
+            except discord.Forbidden:
+                pass
+            except Exception as e:
+                print(f"Failed to DM admin {member.display_name} about AI misconfiguration: {e}")
 
 
 async def _load_cogs(bot: commands.Bot):

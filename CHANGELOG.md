@@ -2,6 +2,25 @@
 
 All notable changes to Nebula will be documented in this file.
 
+## [1.4.0] - 2026-07-14
+
+### Added
+- **Multi-provider AI support**: Nebula can now use Anthropic, Google (Gemini), OpenAI, xAI, OpenRouter, or Groq as its AI backend, selected via the new `AI_PROVIDER` + `AI_API_KEY` environment variables. Previously only OpenAI-compatible endpoints (via `OPENAI_API_KEY`/`OPENAI_BASE_URL`) were supported.
+  - `ai/providers/`: a new provider abstraction layer. `ai/handler.py` no longer imports any AI SDK directly — it talks to a shared `BaseProvider` interface (`call()` / `append_tool_round()`), implemented once per SDK: `openai_sdk.py` (covers OpenAI, xAI, OpenRouter, and Groq — all four are OpenAI-compatible with no dedicated SDK of their own), `anthropic_sdk.py`, and `google_sdk.py` (using the current `google-genai` package).
+  - `ai/config.json`: per-provider `base_url`, `temperature`, and `thinking_level` settings. `thinking_level` (`"low"`/`"medium"`/`"high"`/`null`) is a single word-based setting translated appropriately per provider — passed straight through as `reasoning_effort` for OpenAI-family providers, converted to a numeric `budget_tokens` for Anthropic, and passed as Gemini's own `ThinkingLevel` enum for Google.
+- **Graceful AI misconfiguration handling**: if no AI provider is configured (or the configuration is incomplete/invalid), Nebula no longer fails to start — non-AI features (`/coin`, `/signup`, `/login`, moderation tools, etc.) keep working. Users attempting to chat with Nebula see a short, generic notice; admins additionally receive a detailed one-time notice on startup (console output on both platforms, a DM on Discord, a direct message on Telegram) naming the specific configuration problem.
+  - `DatabaseManager.list_admin_platform_identities(platform)`: a new read-only helper for looking up every admin's linked identity on a given platform, used by the Telegram-side admin notification above.
+
+### Changed
+- **`requirements.txt`**: added `anthropic>=0.116.0` and `google-genai>=2.11.0`.
+- **`.env.sample`**: documents the new `AI_PROVIDER`/`AI_API_KEY`/`AI_MODEL` variables. The previous `OPENAI_API_KEY`/`OPENAI_BASE_URL` pair still works if set (including `OPENAI_BASE_URL` overrides, e.g. for a Gemini-via-OpenAI-compatible-endpoint setup) but is now documented as deprecated, with a console warning printed when it's used.
+
+### Fixed
+- N/A — this release is additive/refactoring only, no bug fixes.
+
+### Notes
+- The pre-existing behavior where a Nebula Coin is spent for a turn even if it then fails because the AI backend isn't configured is **unchanged** by this release — this was true before the provider abstraction existed too, and wasn't in scope for this change (see MIGRATION_GUIDE.md).
+
 ## [1.3.0] - 2026-07-12
 
 ### Added

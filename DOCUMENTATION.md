@@ -26,6 +26,8 @@ main.py
   ├── core.coins.CoinManager
   ├── tools.search.SearchTool
   └── ai.handler.AIHandler
+       │    (internally resolves + constructs one ai.providers.base.BaseProvider
+       │     implementation — see "AI Provider Abstraction" below)
        │
        ├── discord_bot/  (adapter: translates discord.Message <-> handle_turn())
        └── telegram_bot/ (adapter: translates telegram.Update <-> handle_turn())
@@ -33,7 +35,9 @@ main.py
 
 The reason this split exists: `ai/handler.py` has zero platform-specific imports (no `discord.py`, no `python-telegram-bot`). It takes plain strings in (`source_platform`, `platform_user_id`, `display_name`, `message_text`) and returns a plain `TurnResult` out. Each adapter's job is entirely translation — turning a platform-native message object into that plain call, and rendering the result back as platform-native messages. This is what let Telegram support get added without touching a single line of `ai/handler.py`, `core/auth.py`'s identity logic, or `core/memory.py`.
 
-The one deliberate exception is guild moderation (kick/ban/create_channel): these are inherently Discord Guild API operations with no Telegram equivalent, so `handle_turn()` accepts an optional `discord_guild` parameter that Telegram's adapter simply never passes, which automatically excludes those tools from what the AI model is offered.
+The same principle now applies one level deeper: `ai/handler.py` itself has zero AI-SDK-specific imports (no `openai`, `anthropic`, or `google.genai` types anywhere in that file). It talks only to an `ai.providers.base.BaseProvider` instance through two methods, `call()` and `append_tool_round()` — see "AI Provider Abstraction" below. This is what lets a new AI backend get added without touching `ai/handler.py`'s tool-calling loop, memory integration, or coin-spending logic.
+
+The one deliberate exception (at the platform-adapter layer) is guild moderation (kick/ban/create_channel): these are inherently Discord Guild API operations with no Telegram equivalent, so `handle_turn()` accepts an optional `discord_guild` parameter that Telegram's adapter simply never passes, which automatically excludes those tools from what the AI model is offered.
 
 ### Component Responsibilities
 
@@ -42,7 +46,8 @@ The one deliberate exception is guild moderation (kick/ban/create_channel): thes
 - **core/auth.py**: signup/login/approval, plus the `/sync` → `/verify` cross-platform linking flow.
 - **core/memory.py**: per-account conversation memory and the 200k-token cap.
 - **core/coins.py**: Nebula Coin balance, spend, and reset logic.
-- **ai/handler.py**: one conversational turn end-to-end — identity/memory/coin gating, the model call, tool dispatch, memory writes.
+- **ai/handler.py**: one conversational turn end-to-end — identity/memory/coin gating, AI provider resolution, the model call, tool dispatch, memory writes.
+- **ai/providers/**: one file per AI SDK (`openai_sdk.py` covers OpenAI + xAI + OpenRouter + Groq, `anthropic_sdk.py`, `google_sdk.py`), each normalizing its SDK's request/response shape behind `base.py`'s `BaseProvider` interface.
 - **tools/search.py**: web search (Google or Tavily), platform-agnostic.
 - **tools/moderation.py**: kick/ban/create_channel/user-activity-check — Discord-only, takes plain `discord.py` objects.
 - **discord_bot/**, **telegram_bot/**: thin adapters, one file per concern (auth, coins, memory, the AI message handler), mirroring each other's structure.
@@ -60,6 +65,61 @@ Unapproved accounts are not treated as if they don't exist — every gated actio
 
 ## AI System
 
+### AI Provider Abstraction
+
+`ai/handler.py` doesn't call any AI SDK directly. Instead, on construction it resolves which provider to use (from `AI_PROVIDER`/`AI_API_KEY`, or the deprecated `OPENAI_API_KEY`/`OPENAI_BASE_URL` pair — see "Provider Resolution" below) and constructs exactly one `ai.providers.base.BaseProvider` implementation:
+
+```python
+class BaseProvider(ABC):
+    async def call(self, messages, tools, system_prompt) -> NormalizedResponse: ...
+    def append_tool_round(self, messages, response, tool_results) -> list: ...
+```
+
+- **`call()`** sends one request to the provider's API and returns a `NormalizedResponse` — a `content` string (or `None`, if the model only requested tools) plus a list of `NormalizedToolCall` objects (`id`, `name`, `arguments` — already parsed into a dict regardless of provider).
+- **`append_tool_round()`** takes the messages sent, the response received, and the plain-string result of executing each tool call, and returns the new message list to send on the next round. This is where each provider's own conversation-history format lives — OpenAI's `role="assistant"` + `role="tool"` messages, Anthropic's `tool_use`/`tool_result` content blocks, and Google's `Content(role="model"/"user", parts=[...])` shapes are all incompatible with each other, so each provider file owns its own translation rather than forcing them through one shared function in `ai/handler.py`.
+
+Three provider files implement this:
+- **`ai/providers/openai_sdk.py`**: covers `openai`, `xai`, `openrouter`, and `groq` — all four are the same `AsyncOpenAI` client pointed at a different `base_url`, with no SDK-specific behavior to branch on.
+- **`ai/providers/anthropic_sdk.py`**: the official `anthropic` SDK. Handles the `thinking_level` → `budget_tokens` translation (see below).
+- **`ai/providers/google_sdk.py`**: the official `google-genai` SDK (the current unified package — not the older `google-generativeai`).
+
+`ai/handler.py`'s tool-calling loop (`MAX_TOOL_ROUNDS = 5`, unchanged from the pre-provider-abstraction version) only ever calls these two methods; it has no branch anywhere that checks which provider is active.
+
+### Provider Configuration (`ai/config.json`)
+
+Per-provider settings — `base_url` (override; `null` uses the SDK's own default where one exists), `temperature`, and `thinking_level` (`"low"`, `"medium"`, `"high"`, or `null` to disable extended thinking/reasoning):
+
+```json
+{
+  "openai": { "base_url": null, "temperature": 0.7, "thinking_level": null },
+  "anthropic": { "base_url": null, "temperature": 0.7, "thinking_level": null },
+  "google": { "base_url": null, "temperature": 0.7, "thinking_level": null },
+  "xai": { "base_url": "https://api.x.ai/v1", "temperature": 0.7, "thinking_level": null },
+  "openrouter": { "base_url": "https://openrouter.ai/api/v1", "temperature": 0.7, "thinking_level": null },
+  "groq": { "base_url": "https://api.groq.com/openai/v1", "temperature": 0.7, "thinking_level": null }
+}
+```
+
+`xai`, `openrouter`, and `groq` require a `base_url` (they have no SDK default to fall back to); `openai`, `anthropic`, and `google` leave it `null` unless you're overriding the endpoint (e.g. a proxy or self-hosted gateway).
+
+**`thinking_level` is a word, not a number**, and each provider translates it differently:
+- OpenAI-family (`openai`/`xai`/`openrouter`/`groq`): passed straight through as `reasoning_effort` — these APIs already accept these same words natively.
+- `anthropic`: translated to a numeric `budget_tokens` — `"low"` → 4000, `"medium"` → 10000, `"high"` → 24000 — since Anthropic's API takes a token budget, not a level word.
+- `google`: passed as Gemini's own `ThinkingLevel` enum (`LOW`/`MEDIUM`/`HIGH`), which happens to already use the same three words. Note: Gemini also has an older, purely numeric `thinking_budget` mechanism (for Gemini 2.5-generation models); the two are mutually exclusive per Google's API, and this provider always uses `thinking_level`, matching Google's current guidance for 3.x+ models. Whether a given `AI_MODEL` string actually supports `thinking_level` depends on which model generation it is — this isn't validated in advance, the same way OpenAI's `reasoning_effort` isn't validated against whether the selected model supports it either.
+
+### Provider Resolution
+
+On construction, `ai/handler.py` resolves credentials in this order:
+1. If `AI_PROVIDER` or `AI_API_KEY` is set, both must be set (an explicit error otherwise — not a silent fallback to legacy behavior), and `AI_PROVIDER` must be one of `openai`/`anthropic`/`google`/`xai`/`openrouter`/`groq`.
+2. Otherwise, if the deprecated `OPENAI_API_KEY` is set, it's used with `provider=openai`, and `OPENAI_BASE_URL` (if set) still overrides `ai/config.json`'s `openai.base_url` — this keeps existing setups that point `OPENAI_BASE_URL` at a Gemini-compatible endpoint (or any other OpenAI-compatible proxy) working unchanged. A deprecation warning is printed to the console when this path is used.
+3. Otherwise, the AI backend is left unconfigured.
+
+**Unconfigured is not a crash.** If provider resolution fails for any reason (nothing set, an incomplete new-style config, or an unrecognized `AI_PROVIDER` value), `AIHandler.__init__` catches it internally — `self.provider` stays `None`, and every non-AI feature (`/coin`, `/signup`, `/login`, moderation tools reached without going through the model, etc.) keeps working normally. Two separate messages exist for this state:
+- **User-facing** (`AIHandler.user_facing_unconfigured_message()`): a short, generic message with no configuration details — shown as the `blocked_reason` on `TurnResult` when someone tries to chat with Nebula while it's unconfigured.
+- **Admin-facing** (`AIHandler.get_admin_notice_if_unconfigured()`): the specific reason (which env var, which problem), sent to admins on startup — printed to the console immediately, then DMed once to every linked Discord admin (via `discord_bot/client.py`'s `_notify_admins_if_ai_unconfigured`, which iterates guild members the same way `discord_bot/search_command.py`'s existing disabled-search notice does, since Discord bots can only DM someone they share a guild with) and messaged once to every linked Telegram admin (via `telegram_bot/client.py`'s equivalent, which — unlike Discord — looks admins up directly via `DatabaseManager.list_admin_platform_identities()`, since Telegram has no shared-server precondition for DMing a user). Each adapter tracks its own "already notified" state independently; neither platform starting first suppresses the other's notification.
+
+**Known pre-existing behavior, unchanged by this refactor**: the coin-spend check happens before the provider-configured check in `handle_turn()` — a user whose turn fails because the AI backend isn't configured still loses a coin for that turn, same as before this refactor. This wasn't changed as part of adding the provider abstraction (see MIGRATION_GUIDE.md's "coins spent on a mis-configured turn" note if this behavior is ever revisited).
+
 ### Message Processing Flow (both platforms)
 
 1. **Trigger check** (adapter-specific): Discord requires a mention in guild channels, none in DMs; Telegram requires a mention in groups, none in private chats.
@@ -67,15 +127,16 @@ Unapproved accounts are not treated as if they don't exist — every gated actio
    - Resolve approved identity (or return a specific blocked reason).
    - Check memory isn't full.
    - Spend 1 coin (or return an insufficient-funds message).
+   - Check the AI provider is configured (or return the generic unconfigured message).
    - Load conversation context (cross-platform, per-account).
-   - Call the model with the tools available to this identity/context.
+   - Call the model, through the resolved provider, with the tools available to this identity/context.
    - Dispatch any tool calls.
    - Write both the user's message and the assistant's reply to memory.
 3. **Adapter renders the result** back as platform-native messages, chunked to that platform's character limit (2000 for Discord, 4096 for Telegram).
 
 ### Tool System
 
-Tools are defined in OpenAI's function-calling format. Which tools are offered depends on the caller's admin status AND whether the platform passed a `discord_guild` (only Discord ever does):
+Tools are defined in OpenAI's function-calling format (unchanged by the provider abstraction — every provider translates this same format into its own SDK's tool schema internally). Which tools are offered depends on the caller's admin status AND whether the platform passed a `discord_guild` (only Discord ever does):
 
 ```python
 {
@@ -165,7 +226,7 @@ Every admin action (from either platform) is logged to `admin_actions_log`. View
 
 ## Database Structure
 
-See README.md's Database Schema table for the full list. The short version: everything hangs off `nebula_user_id` (from `nebula_users`), and `platform_identities` is the only table that knows about specific platform user IDs.
+See README.md's Database Schema table for the full list. The short version: everything hangs off `nebula_user_id` (from `nebula_users`), and `platform_identities` is the only table that knows about specific platform user IDs. `DatabaseManager.list_admin_platform_identities(platform)` is a small, read-only helper on top of this same schema (a join of `nebula_users.is_admin = 1` against `platform_identities`), used for one-off admin notifications (currently: the AI-misconfiguration notice on Telegram — see "Provider Resolution" above) where a direct per-platform admin lookup is possible.
 
 ## Best Practices
 

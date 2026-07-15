@@ -266,6 +266,38 @@ class DatabaseManager:
         ]
 
     # ------------------------------------------------------------------
+    # Admin lookup by platform (used for one-off admin notifications,
+    # e.g. AIHandler's misconfiguration notice — see
+    # discord_bot/client.py's notify_admins_if_ai_unconfigured() and
+    # telegram_bot/client.py's equivalent)
+    # ------------------------------------------------------------------
+
+    def list_admin_platform_identities(self, platform: str) -> List[Dict]:
+        """Return every admin's platform_user_id + display name for a
+        given platform, via a join on nebula_users.is_admin = 1 --
+        mirrors list_pending_users() above in shape/style. Used where a
+        direct per-platform lookup is possible (today: Telegram, which
+        has no "shared server" precondition for DMing a user — see
+        telegram_bot/client.py's notify function for why Discord can't
+        use this same direct-lookup approach and instead iterates
+        guild members, same as discord_bot/search_command.py's existing
+        notify_admins_if_disabled())."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT p.platform_user_id, u.display_name, p.platform_display_name
+            FROM nebula_users u
+            JOIN platform_identities p ON p.nebula_user_id = u.nebula_user_id
+            WHERE u.is_admin = 1 AND p.platform = ?
+        ''', (platform,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [
+            {'platform_user_id': r[0], 'display_name': r[1], 'platform_display_name': r[2]}
+            for r in rows
+        ]
+
+    # ------------------------------------------------------------------
     # Bootstrap admin claim (single-use API key)
     # ------------------------------------------------------------------
 
@@ -342,8 +374,8 @@ class DatabaseManager:
     # ------------------------------------------------------------------
 
     def create_sync_code(self, nebula_user_id: int, target_platform: str, code: str):
-        """Store a new sync code. Any prior UNCONSUMED code for this exact
-        (nebula_user_id, target_platform) pair is invalidated first (marked
+        """Store a new sync code. Any prior UNCONSUMED code for this
+        exact (nebula_user_id, target_platform) pair is invalidated first (marked
         consumed), so at most one code is ever "live" at a time — a user
         who runs /sync twice by mistake doesn't end up wondering which of
         two codes is the current one; only the newest is valid."""

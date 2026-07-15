@@ -64,7 +64,7 @@ Kick, ban, and channel creation are inherently Discord Guild operations with no 
 
 - Python 3.9 or higher
 - A Discord Bot Token, a Telegram Bot Token, or both (at least one is required)
-- OpenAI-compatible API Key (e.g., Google AI Studio, OpenAI, Liara.ir)
+- An API key for at least one supported AI provider (OpenAI, Anthropic, Google, xAI, OpenRouter, or Groq)
 - Google Custom Search or Tavily API key (optional, for search functionality)
 
 ## 🚀 Installation
@@ -89,14 +89,14 @@ pip install -r requirements.txt
 cp .env.sample .env
 ```
 
-2. Edit `.env` and fill in your credentials. At minimum, you need `OPENAI_API_KEY`, `AI_MODEL`, `ADMIN_BOOTSTRAP_KEY`, and **at least one** of `DISCORD_TOKEN` / `TELEGRAM_BOT_TOKEN`:
+2. Edit `.env` and fill in your credentials. At minimum, you need `AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL`, `ADMIN_BOOTSTRAP_KEY`, and **at least one** of `DISCORD_TOKEN` / `TELEGRAM_BOT_TOKEN`:
 
 ```env
 DISCORD_TOKEN=your_discord_bot_token_here
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-OPENAI_API_KEY=your_api_key_here
-OPENAI_BASE_URL=  # Optional: e.g., https://generativelanguage.googleapis.com/v1beta/openai/
-AI_MODEL=google/gemini-2.0-flash-001
+AI_PROVIDER=google
+AI_API_KEY=your_api_key_here
+AI_MODEL=gemini-2.0-flash-001
 ADMIN_BOOTSTRAP_KEY=  # generate per the instructions in .env.sample
 ```
 
@@ -114,9 +114,21 @@ ADMIN_BOOTSTRAP_KEY=  # generate per the instructions in .env.sample
 
 You don't need both — set whichever platform(s) you actually want to run. Nebula starts every adapter it has a token for and skips the rest.
 
-#### AI API Key (Gemini example):
-1. Go to [Google AI Studio](https://aistudio.google.com/), create an API key
-2. Copy it into `OPENAI_API_KEY`, and set `OPENAI_BASE_URL` to `https://generativelanguage.googleapis.com/v1beta/openai/`
+#### AI Provider Key:
+Nebula supports six AI providers, selected via `AI_PROVIDER`. Set `AI_API_KEY` to that provider's key, and `AI_MODEL` to a model string that provider recognizes:
+
+| `AI_PROVIDER` | Where to get a key | Example `AI_MODEL` |
+|---|---|---|
+| `openai` | [platform.openai.com](https://platform.openai.com/) | `gpt-5.2` |
+| `anthropic` | [console.anthropic.com](https://console.anthropic.com/) | `claude-sonnet-4-6` |
+| `google` | [Google AI Studio](https://aistudio.google.com/) | `gemini-3.1-pro-preview` |
+| `xai` | [console.x.ai](https://console.x.ai/) | `grok-4.3` |
+| `openrouter` | [openrouter.ai](https://openrouter.ai/) | `anthropic/claude-sonnet-4` |
+| `groq` | [console.groq.com](https://console.groq.com/) | `llama-3.3-70b-versatile` |
+
+`openai`, `anthropic`, and `google` talk to their official APIs directly. `xai`, `openrouter`, and `groq` are accessed as OpenAI-compatible endpoints — their base URLs are already configured for you in `ai/config.json`, no extra setup needed.
+
+If you were using Nebula before this provider system existed, your old `OPENAI_API_KEY`/`OPENAI_BASE_URL` setup (e.g. pointed at Gemini) still works unchanged — see `.env.sample`'s deprecated section — but new setups should use `AI_PROVIDER` + `AI_API_KEY` instead.
 
 #### Google Custom Search / Tavily (Optional):
 - Google: [API Key](https://console.cloud.google.com/apis/credentials) + [Search Engine ID](https://programmablesearchengine.google.com/)
@@ -222,7 +234,13 @@ nebula/
 │   ├── memory.py              #   Per-account conversation memory (200k token cap)
 │   └── coins.py               #   Nebula Coin balance/spend/reset logic
 ├── ai/
-│   └── handler.py             # Platform-agnostic conversation turn handling (model calls, tool dispatch)
+│   ├── handler.py             # Platform-agnostic conversation turn handling (model calls, tool dispatch)
+│   ├── config.json            # Per-provider base_url/temperature/thinking_level settings
+│   └── providers/              # One file per AI SDK, normalized behind a shared interface
+│       ├── base.py             #   BaseProvider, NormalizedResponse, NormalizedToolCall
+│       ├── openai_sdk.py       #   OpenAI + xAI + OpenRouter + Groq (all plain AsyncOpenAI, different base_url)
+│       ├── anthropic_sdk.py    #   Anthropic
+│       └── google_sdk.py       #   Google Gemini
 ├── tools/                     # AI-callable tools
 │   ├── search.py               #   Platform-agnostic (Google / Tavily)
 │   └── moderation.py           #   Discord-only (kick/ban/create_channel need a discord.Guild)
@@ -261,10 +279,12 @@ Schema is organized around **Nebula accounts**, not guilds or channels — this 
 - **Token Counting**: `tiktoken`
 
 ### AI Configuration
-- **Model**: set via `AI_MODEL` (any OpenAI-compatible model string)
-- **Temperature**: 0.7
+- **Provider**: set via `AI_PROVIDER` (`openai`, `anthropic`, `google`, `xai`, `openrouter`, or `groq`) + `AI_API_KEY`. See `ai/config.json` for per-provider `base_url`/`temperature`/`thinking_level` settings.
+- **Model**: set via `AI_MODEL` (a model string your chosen provider recognizes)
+- **Temperature**: 0.7 by default (configurable per-provider in `ai/config.json`)
 - **Max Tokens**: 2000 per response
-- **Custom Base URL**: supports OpenAI-compatible APIs via `OPENAI_BASE_URL`
+- **Extended thinking / reasoning**: optional, per-provider, via `ai/config.json`'s `thinking_level` field (`"low"`, `"medium"`, `"high"`, or `null` to disable)
+- **Legacy config**: the older `OPENAI_API_KEY` + `OPENAI_BASE_URL` pair (including custom base URLs, e.g. for Gemini via its OpenAI-compatible endpoint) still works if set, but is deprecated in favor of `AI_PROVIDER` + `AI_API_KEY`
 
 ### Message Handling
 - **Discord**: 2000-character limit, auto-split into multiple messages when exceeded
