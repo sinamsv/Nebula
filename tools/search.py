@@ -1,24 +1,3 @@
-"""Platform-agnostic web search tool.
-
-Supports two interchangeable providers: Google Custom Search and Tavily
-(an AI-native search API). Which provider is used is controlled by the
-SEARCH_PROVIDER environment variable ('google' or 'tavily', defaults to
-'google'). Both providers' credentials can be configured at the same
-time; only the selected one is used.
-
-Enablement rule (deliberately simple, no automatic fallback):
-- If the credentials for the SELECTED provider are missing, the entire
-  search tool is disabled, even if the other provider's credentials are
-  present.
-- If the selected provider's credentials ARE present, search proceeds
-  normally with that provider. No mixing within a single request.
-
-This module has zero discord.py (or any platform SDK) imports. Any
-adapter — discord_bot/, a future telegram_bot/, a future API server —
-imports SearchTool directly and calls perform_search(). The Discord
-slash command wrapper lives in discord_bot/search_command.py and is a
-thin pass-through to this.
-"""
 import aiohttp
 import os
 

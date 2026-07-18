@@ -2,6 +2,33 @@
 
 All notable changes to Nebula will be documented in this file.
 
+## [1.5.0] - 2026-07-18
+
+### Added
+- **Web panel (`web_backend/`)**: a third platform adapter, alongside Discord and Telegram — a FastAPI backend (paired with a Next.js frontend) that lets users sign up, log in, chat with Nebula (including image uploads), link Discord/Telegram, and — for admins — review pending signups and manage coin balances, all through a browser. Structurally parallel to `discord_bot/`/`telegram_bot/`: a thin adapter over the same `core/` and `ai/` logic, using `platform="web"` in `platform_identities` exactly like `"discord"`/`"telegram"`.
+  - Auth: JWT-based (`PyJWT`, HS256), issued on signup/login, validated on every authenticated request via `Authorization: Bearer <token>`. New `JWT_SECRET` env var.
+  - **Multi-chat support (web-only)**: unlike Discord/Telegram (which keep their existing single continuous conversation per account, completely unchanged), the web panel supports multiple independently-named chats per account. New `chats` table; `conversation_history` gains a nullable `chat_id` column — `NULL` means the legacy Discord/Telegram single-thread history (existing rows and existing query paths are entirely unaffected), a real `chat_id` scopes a message to one web chat. **Each web chat has its own independent 200,000-token memory cap** — not pooled with the account's shared Discord/Telegram cap, and not pooled with the account's other web chats.
+  - `core/memory.py`'s `MemoryManager` methods all gained an optional `chat_id` parameter (default `None`, preserving exact prior behavior) to support this without any changes needed on the Discord/Telegram side.
+  - **Real multimodal image support (web-only, a capability upgrade)**: `POST /api/v1/chat/{id}/messages/image` forwards uploaded images to the AI provider as actual image content (not just a text placeholder). `ai/providers/base.py`'s `BaseProvider.call()` gained an optional `images` parameter (default `None`, a complete no-op for Discord/Telegram, which never pass it); each provider (OpenAI, Anthropic, Google) translates it into its own SDK's multimodal content-block shape, verified via live SDK inspection. Discord/Telegram continue to only send a `"[User attached N image(s)]"` text note, unchanged.
+  - Per-message tool toggle: the web chat endpoint accepts `{"tools": {"search": false}}` to omit the search tool for that turn — `AIHandler.get_available_tools()` gained an `enable_search` parameter (default `True`, unchanged for Discord/Telegram).
+  - Full API surface: `/api/v1/auth/{signup,login,google,google/callback,bootstrap-status}`, `/api/v1/chat` (list/create), `/api/v1/chat/{id}` (get/rename/delete), `/api/v1/chat/{id}/messages(/image)`, `/api/v1/users/me/coins` (self-only), `/api/v1/users/{id}/coins` (admin-only modify), `/api/v1/sync/{platform}`, `/api/v1/platforms`, `/api/v1/admin/users/pending`, `/api/v1/admin/users/{id}/review`, `/api/v1/admin/platforms`.
+  - `core/auth.py`: new `AuthManager.approve_user_by_id()`, an id-based sibling to the existing username-based `approve_user()` (which Discord/Telegram's `/approve_user` command keeps using unchanged) — needed since the web admin review endpoint targets a `nebula_user_id` in its path rather than a username.
+- **Google OAuth infrastructure (not wired to any tool yet)**: `GET /api/v1/auth/google` + `GET /api/v1/auth/google/callback` take a user through Google's consent flow and land their tokens in a new `oauth_connections` table, **encrypted** (via `cryptography`'s Fernet, new `core/crypto.py` module, new `OAUTH_TOKEN_ENCRYPTION_KEY` env var) rather than hashed — unlike `password_hash`, OAuth tokens must be recoverable in plaintext to eventually call Google's APIs. Entirely optional/skippable: no part of Nebula requires connecting Google. No actual Sheets/Calendar tool is built this release — this is groundwork only.
+- **Web adapter startup**: `main.py` gained a third adapter branch, gated on `WEB_ENABLED=true` (plus `JWT_SECRET` and `OAUTH_TOKEN_ENCRYPTION_KEY`), served in-process via `uvicorn.Server` alongside Discord/Telegram under the same `asyncio.gather()` — still just `python main.py`, no separate backend process to run.
+- **Docker**: `Dockerfile` now `EXPOSE`s port 8000 (harmless no-op when `WEB_ENABLED` is unset); `docker-compose.yml` publishes `${WEB_PORT:-8000}:8000`.
+
+### Changed
+- **`requirements.txt`**: added `fastapi`, `uvicorn[standard]`, `pyjwt`, `cryptography`, `python-multipart`, `httpx`.
+- **`.env.sample`**: documents all new web-adapter env vars (`WEB_ENABLED`, `WEB_PORT`, `WEB_FRONTEND_URL`, `JWT_SECRET`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_ID`/`SECRET`/`REDIRECT_URI`).
+- **`core/database.py`**: `add_message()`, `get_conversation_history()`, `get_total_tokens()`, `reset_conversation()` all gained an optional `chat_id` parameter (default `None`, preserving exact prior SQL/behavior for every existing Discord/Telegram call site). New `chats` and `oauth_connections` tables; existing databases auto-migrate on startup (`ALTER TABLE conversation_history ADD COLUMN chat_id` runs once, guarded by a `PRAGMA table_info` check — pre-existing rows get `chat_id = NULL` automatically, which is exactly the "legacy history" meaning needed, no backfill required).
+- **`ai/handler.py`**: `handle_turn()` gained optional `chat_id`, `images`, and `enable_search` parameters, all defaulting to values that preserve exact prior behavior for Discord/Telegram (`None`, `None`, `True` respectively).
+
+### Fixed
+- N/A — this release is additive only, no bug fixes.
+
+### Notes
+- Verified via a full regression pass: the project's own pre-existing `test_handler_integration.py` (5 tests) and `test_providers.py` (8 tests) both pass unchanged against this release's `ai/handler.py` and `ai/providers/*.py`, confirming zero behavior change for Discord/Telegram. New `tests/test_web_backend_integration.py` (7 tests) covers the web adapter end-to-end, including a dedicated test confirming a Discord-originated message and a web chat message for the same account never appear in each other's history.
+
 ## [1.4.0] - 2026-07-14
 
 ### Added

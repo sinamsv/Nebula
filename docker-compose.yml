@@ -25,6 +25,15 @@ services:
       # to ./nebula.db inside the container's ephemeral filesystem and
       # this volume mount has nothing to actually persist.
       - DB_PATH=/app/data/nebula.db
+    ports:
+      # Only meaningful when WEB_ENABLED=true in .env (see .env.sample)
+      # -- Discord/Telegram need no published port at all (outbound-only
+      # gateway/long-polling connections). Left unconditional here
+      # (rather than a separate compose profile) since an unused
+      # published port on a container that never listens is harmless;
+      # keeping one compose file (no separate web-only override file)
+      # was the confirmed, simpler choice for this pass.
+      - "${WEB_PORT:-8000}:8000"
 
 volumes:
   nebula-data:

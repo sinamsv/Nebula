@@ -1,21 +1,3 @@
-"""Discord moderation tools: kick, ban, create_channel, and a Nebula-aware
-user activity lookup.
-
-Unlike tools/search.py, this module is NOT platform-agnostic — kick/ban/
-create_channel are inherently Discord Guild API operations with no
-Telegram equivalent, so there's no meaningful way to abstract them
-further without losing what they actually do. What IS separated out is
-the coupling to any specific Discord *command* — this module knows
-nothing about slash commands, cogs, or discord.Message; it takes plain
-discord.py domain objects (Guild, Member) and IDs.
-
-Permission checking (is this caller a Nebula admin?) is deliberately NOT
-done in this module. Callers — currently discord_bot/*_commands.py and
-ai/handler.py — are responsible for checking admin status via
-core.auth before calling any function here. This keeps "who is allowed"
-(a core/auth concern) separate from "what the action does" (this
-module's concern).
-"""
 import re
 from typing import Optional
 

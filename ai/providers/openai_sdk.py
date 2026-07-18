@@ -11,17 +11,25 @@ This is a fairly direct extraction of the tool-calling shape that
 already existed, working, in ai/handler.py before this refactor -- see
 that file's git history / the pre-refactor version for the original
 inline version of this same logic. Verified against the installed
-openai==2.45.0 package; AsyncOpenAI's constructor signature (api_key,
+openai==2.46.0 package; AsyncOpenAI's constructor signature (api_key,
 base_url, ...) is unchanged from what the pre-refactor code already
 relied on, so no behavior changes here, only relocation +
 normalization.
+
+Multimodal image support (verified via live inspection of
+openai.types.chat.ChatCompletionContentPartImageParam /
+ImageURL in the installed package): OpenAI wants image content as
+{"type": "image_url", "image_url": {"url": "data:<mime>;base64,<b64>"}}
+-- a data: URL, not separate media_type/data fields the way Anthropic
+does it. See _attach_images_to_last_message() below.
 """
+import base64
 import json
 from typing import Any, Dict, List, Optional
 
 from openai import AsyncOpenAI
 
-from ai.providers.base import BaseProvider, NormalizedResponse, NormalizedToolCall
+from ai.providers.base import BaseProvider, ImageAttachment, NormalizedResponse, NormalizedToolCall
 
 
 class OpenAISDKProvider(BaseProvider):
@@ -50,8 +58,12 @@ class OpenAISDKProvider(BaseProvider):
         self.thinking_level = thinking_level
 
     async def call(self, messages: List[Dict], tools: List[Dict],
-                    system_prompt: str) -> NormalizedResponse:
-        full_messages = [{"role": "system", "content": system_prompt}] + messages
+                    system_prompt: str,
+                    images: Optional[List[ImageAttachment]] = None) -> NormalizedResponse:
+        full_messages = [{"role": "system", "content": system_prompt}] + list(messages)
+
+        if images:
+            full_messages[-1] = self._attach_images_to_message(full_messages[-1], images)
 
         kwargs: Dict[str, Any] = {
             "model": self.model,
@@ -81,6 +93,30 @@ class OpenAISDKProvider(BaseProvider):
             tool_calls=normalized_tool_calls,
             raw=message,
         )
+
+    @staticmethod
+    def _attach_images_to_message(message: Dict, images: List[ImageAttachment]) -> Dict:
+        """Rewrite a plain {"role": ..., "content": "<str>"} message
+        into OpenAI's multimodal list-content shape: a text part
+        (the original string content) plus one image_url part per
+        attachment, each base64-encoded into a data: URL -- the exact
+        shape verified against ChatCompletionContentPartImageParam /
+        ImageURL in the installed SDK (see module docstring).
+
+        Only ever called on the LAST message of a turn (see call()
+        above and BaseProvider.call()'s docstring) -- images attach to
+        the current user turn, never to history."""
+        original_text = message.get("content", "")
+        content_parts: List[Dict] = []
+        if original_text:
+            content_parts.append({"type": "text", "text": original_text})
+        for img in images:
+            b64_data = base64.b64encode(img.data).decode("utf-8")
+            content_parts.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{img.mime_type};base64,{b64_data}"},
+            })
+        return {**message, "content": content_parts}
 
     def append_tool_round(self, messages: List[Dict], response: NormalizedResponse,
                            tool_results: List[str]) -> List[Dict]:

@@ -2,23 +2,38 @@
 
 This is the ONE file you run: `python main.py`.
 
-Both platform adapters (Discord, Telegram) share a single set of
-core.database/auth/memory/coins instances and a single
+All three platform adapters (Discord, Telegram, Web) share a single set
+of core.database/auth/memory/coins instances and a single
 ai.handler.AIHandler, all constructed exactly once here. That sharing is
 what makes identity, memory, and coin balance genuinely cross-platform:
-a message sent via Telegram and a message sent via Discord for the SAME
-Nebula account read and write through the exact same objects, not two
-siloed copies of the same sqlite file. This replaces the previous
-Discord-only setup where discord_bot.client.build_bot() constructed its
-own db/auth/memory/search_tool internally — see that module's git
-history / the version of this file before the Telegram adapter existed.
+a message sent via Telegram and a message sent via Discord (or the web
+panel) for the SAME Nebula account read and write through the exact
+same objects, not siloed copies of the same sqlite file.
 
 Each adapter is independently optional: whichever of DISCORD_TOKEN /
-TELEGRAM_BOT_TOKEN is set in .env determines which adapter(s) actually
-start. Both, one, or (if neither is set) neither — with an explicit
-error in that last case rather than silently doing nothing, matching
-this project's "explicit failure over silent fallback" principle
-everywhere else (see core/auth.py, core/memory.py, tools/search.py).
+TELEGRAM_BOT_TOKEN / WEB_ENABLED is set in .env determines which
+adapter(s) actually start. All three, some, or (if none are set)
+none — with an explicit error in that last case rather than silently
+doing nothing, matching this project's "explicit failure over silent
+fallback" principle everywhere else (see core/auth.py, core/memory.py,
+tools/search.py).
+
+--- Web adapter addition ---
+
+Confirmed with Sina: the web adapter (FastAPI + uvicorn, serving
+web_backend/app.py's app) gets its own entry in this same asyncio.gather()
+alongside Discord/Telegram, run as an in-process ASGI server via
+uvicorn.Server rather than a separate `uvicorn web_backend.app:app`
+process/command. This keeps the "one file you run: python main.py"
+promise intact for the backend -- the ONLY separate process a person
+running Nebula needs to think about is the Next.js frontend itself
+(a genuinely different runtime, Node.js vs Python, which can't share
+this event loop regardless), not the API server.
+
+Gating: WEB_ENABLED=true (plus JWT_SECRET and OAUTH_TOKEN_ENCRYPTION_KEY,
+both required for web_backend/app.py's create_app() to succeed) turns
+the web adapter on, mirroring how DISCORD_TOKEN / TELEGRAM_BOT_TOKEN
+already gate their adapters. WEB_PORT (default 8000) picks the port.
 """
 import asyncio
 import os
@@ -36,6 +51,25 @@ from ai.handler import AIHandler
 
 import discord_bot.client as discord_client
 import telegram_bot.client as telegram_client
+
+
+async def _start_web_adapter(db, auth, memory, coins, ai_handler):
+    """Constructs web_backend's FastAPI app and serves it in-process via
+    uvicorn.Server.serve() -- an awaitable coroutine, same shape as
+    discord_client.start() and telegram_client.start(), so it slots
+    into the same asyncio.gather() call below without needing its own
+    event loop (uvicorn.run() would try to own the loop itself, which
+    is exactly what discord_bot/client.py's start() docstring already
+    explains must be avoided when multiple adapters share one loop)."""
+    import uvicorn
+    from web_backend.app import create_app
+
+    app = create_app(db, auth, memory, coins, ai_handler)
+    port = int(os.getenv('WEB_PORT', '8000'))
+    config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
+    server = uvicorn.Server(config)
+    print(f"Web adapter configured — starting on port {port}.")
+    await server.serve()
 
 
 async def main():
@@ -71,11 +105,25 @@ async def main():
     else:
         print("TELEGRAM_BOT_TOKEN not set — Telegram adapter disabled.")
 
+    web_enabled = os.getenv('WEB_ENABLED', '').strip().lower() in ('1', 'true', 'yes')
+    if web_enabled:
+        missing = [v for v in ('JWT_SECRET', 'OAUTH_TOKEN_ENCRYPTION_KEY') if not os.getenv(v)]
+        if missing:
+            print(
+                f"ERROR: WEB_ENABLED is true but {', '.join(missing)} "
+                f"{'is' if len(missing) == 1 else 'are'} not set — web adapter cannot start. "
+                "See .env.sample for how to generate these."
+            )
+        else:
+            tasks.append(_start_web_adapter(db, auth, memory, coins, ai_handler))
+    else:
+        print("WEB_ENABLED not set — Web adapter disabled.")
+
     if not tasks:
         print(
-            "ERROR: No platform adapters are configured. Set DISCORD_TOKEN "
-            "and/or TELEGRAM_BOT_TOKEN in your .env file — Nebula has "
-            "nothing to run."
+            "ERROR: No platform adapters are configured. Set DISCORD_TOKEN, "
+            "TELEGRAM_BOT_TOKEN, and/or WEB_ENABLED in your .env file — "
+            "Nebula has nothing to run."
         )
         return
 

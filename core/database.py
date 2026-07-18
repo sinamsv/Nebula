@@ -8,14 +8,46 @@ class DatabaseManager:
     """Platform-agnostic database layer for Nebula.
 
     Schema is organized around `nebula_users` (a Nebula account) rather than
-    guild/channel. Platform identities (Discord, Telegram, ...) are linked to
-    a nebula_user via `platform_identities`, and everything else — memory,
-    coin balance, admin status — hangs off the nebula_user_id.
+    guild/channel. Platform identities (Discord, Telegram, Web, ...) are
+    linked to a nebula_user via `platform_identities`, and everything else —
+    memory, coin balance, admin status — hangs off the nebula_user_id.
 
     This is a deliberate replacement of the old per-guild/per-channel schema:
     old data does not migrate automatically (different primary keys, no
     reliable way to know which historical Discord user should map to which
     new Nebula account without a signup step). Fresh install expected.
+
+    --- Web panel schema addition (chats / chat-scoped memory) ---
+
+    Discord and Telegram both use ONE continuous conversation_history per
+    nebula_user_id, unchanged since day one. The web panel introduces
+    multiple named chats per account (confirmed with Sina), each with its
+    own token cap, which conversation_history needs to represent without
+    disturbing the existing Discord/Telegram path in any way.
+
+    Confirmed approach: conversation_history gets a new nullable `chat_id`
+    column (FK -> chats.chat_id).
+      - chat_id IS NULL  -> the legacy single-thread history used by
+        Discord/Telegram. Every existing query that doesn't filter on
+        chat_id keeps working exactly as it did before this migration,
+        since old rows are untouched and new Discord/Telegram rows are
+        inserted the same way as always (add_message() defaults
+        chat_id=None).
+      - chat_id IS NOT NULL -> scopes a message to one specific web chat.
+        Confirmed with Sina: each web chat has its OWN independent
+        200k-token cap (NOT pooled with the account's Discord/Telegram
+        cap, and NOT pooled with the account's other web chats). This is
+        why get_total_tokens() below takes an optional chat_id: passing
+        None sums the legacy (chat_id IS NULL) rows only, exactly like
+        before; passing a chat_id sums only that chat's rows.
+
+    This nullable-column approach (rather than, say, a separate table for
+    web messages) was chosen so every existing Discord/Telegram code path
+    -- add_message(), get_conversation_history(), get_total_tokens(),
+    reset_conversation() -- keeps working with zero call-site changes
+    unless a caller explicitly opts into chat-scoping by passing a
+    chat_id. That was the deciding factor given how much of core/ and
+    both bot adapters already call these methods positionally.
     """
 
     def __init__(self, db_path: str = "nebula.db"):
@@ -63,16 +95,14 @@ class DatabaseManager:
         # ------------------------------------------------------------
         # Cross-platform account linking (sync codes)
         # ------------------------------------------------------------
-        # Supports the /sync (Discord) -> /verify (Telegram, or any future
-        # platform) flow: an already-approved, already-linked account
-        # generates a one-time code on ITS platform, then carries that
-        # code to the NEW platform to prove ownership. This direction
-        # (issue-then-carry) exists because a fresh platform identity has
-        # no way to be messaged first — Telegram in particular refuses to
-        # let a bot message a user_id it hasn't received a message FROM
-        # yet, so the "other bot DMs you a code" direction some platforms
-        # support isn't universally available. Discord-issues-code,
-        # user-carries-it-to-Telegram works regardless of platform.
+        # Supports the /sync (Discord, or now Web) -> /verify (Telegram, or
+        # any future consuming platform) flow: an already-approved,
+        # already-linked account generates a one-time code on ITS
+        # platform, then carries that code to the NEW platform to prove
+        # ownership. Web joins Discord as an ISSUING platform only
+        # (confirmed with Sina: one-directional, web never consumes a
+        # code -- there is no web-side /verify endpoint). Telegram
+        # remains the only consuming platform today.
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS platform_sync_codes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,19 +115,61 @@ class DatabaseManager:
         ''')
 
         # ------------------------------------------------------------
+        # Web chats (NEW) -- multiple named conversations per account,
+        # web-only. Discord/Telegram never create rows here; their
+        # messages stay chat_id-less in conversation_history (see below).
+        # ------------------------------------------------------------
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS chats (
+                chat_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nebula_user_id INTEGER NOT NULL REFERENCES nebula_users(nebula_user_id),
+                title TEXT NOT NULL DEFAULT 'New Chat',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_message_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_chats_nebula_user_id
+            ON chats(nebula_user_id)
+        ''')
+
+        # ------------------------------------------------------------
         # Conversation memory (per Nebula user, not per channel)
         # ------------------------------------------------------------
+        # chat_id: nullable FK -> chats.chat_id. NULL = legacy
+        # Discord/Telegram single-thread history (unchanged behavior).
+        # Non-null = scoped to one web chat. See class docstring above
+        # for the full rationale.
 
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS conversation_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 nebula_user_id INTEGER NOT NULL REFERENCES nebula_users(nebula_user_id),
+                chat_id INTEGER REFERENCES chats(chat_id),
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
                 source_platform TEXT NOT NULL,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 token_count INTEGER DEFAULT 0
             )
+        ''')
+        # Migration path for pre-existing databases created before this
+        # column existed: ALTER TABLE ADD COLUMN is idempotent-guarded
+        # via the pragma check below, since SQLite has no
+        # "ADD COLUMN IF NOT EXISTS". Existing rows get chat_id = NULL
+        # automatically (SQLite's default for a newly added column with
+        # no explicit DEFAULT), which is exactly the "legacy history"
+        # meaning we want -- no data migration/backfill needed.
+        cursor.execute("PRAGMA table_info(conversation_history)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+        if 'chat_id' not in existing_columns:
+            cursor.execute('ALTER TABLE conversation_history ADD COLUMN chat_id INTEGER REFERENCES chats(chat_id)')
+            print("Migrated conversation_history: added nullable chat_id column")
+
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_conversation_history_user_chat
+            ON conversation_history(nebula_user_id, chat_id)
         ''')
 
         # ------------------------------------------------------------
@@ -146,6 +218,31 @@ class DatabaseManager:
         ''')
 
         # ------------------------------------------------------------
+        # OAuth connections (NEW) -- infrastructure only this release,
+        # not wired to any tool yet. One row per (nebula_user_id,
+        # provider); tokens are ENCRYPTED (not hashed -- unlike
+        # password_hash above, these must be recoverable in plaintext
+        # to actually call Google's APIs later). Encryption/decryption
+        # lives in core/crypto.py, not here -- this table just stores
+        # whatever ciphertext it's handed.
+        # ------------------------------------------------------------
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS oauth_connections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nebula_user_id INTEGER NOT NULL REFERENCES nebula_users(nebula_user_id),
+                provider TEXT NOT NULL,
+                access_token TEXT NOT NULL,
+                refresh_token TEXT,
+                expires_at DATETIME,
+                scopes TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(nebula_user_id, provider)
+            )
+        ''')
+
+        # ------------------------------------------------------------
         # Discord-specific: legacy per-guild server settings (kept as-is,
         # not part of the platform-agnostic core)
         # ------------------------------------------------------------
@@ -161,7 +258,7 @@ class DatabaseManager:
 
         conn.commit()
         conn.close()
-        print("Database initialized successfully (user-scoped schema)")
+        print("Database initialized successfully (user-scoped schema, chat-scoped web memory)")
 
     # ------------------------------------------------------------------
     # Identity: nebula_users
@@ -275,13 +372,7 @@ class DatabaseManager:
     def list_admin_platform_identities(self, platform: str) -> List[Dict]:
         """Return every admin's platform_user_id + display name for a
         given platform, via a join on nebula_users.is_admin = 1 --
-        mirrors list_pending_users() above in shape/style. Used where a
-        direct per-platform lookup is possible (today: Telegram, which
-        has no "shared server" precondition for DMing a user — see
-        telegram_bot/client.py's notify function for why Discord can't
-        use this same direct-lookup approach and instead iterates
-        guild members, same as discord_bot/search_command.py's existing
-        notify_admins_if_disabled())."""
+        mirrors list_pending_users() above in shape/style."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -396,9 +487,7 @@ class DatabaseManager:
                              expiry_minutes: int) -> Optional[Dict]:
         """Return the most recent unconsumed sync code for this
         (nebula_user_id, target_platform) pair, or None if there isn't
-        one or it has expired. Elapsed-time expiry check follows the same
-        pattern as _maybe_reset's coin-balance-reset logic below, for the
-        same second-level-precision reasons noted on get_conversation_history."""
+        one or it has expired."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -434,33 +523,134 @@ class DatabaseManager:
         conn.close()
 
     # ------------------------------------------------------------------
-    # Conversation memory (per nebula_user_id, cross-platform)
+    # Web chats (NEW)
+    # ------------------------------------------------------------------
+
+    def create_chat(self, nebula_user_id: int, title: str = "New Chat") -> int:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO chats (nebula_user_id, title) VALUES (?, ?)
+        ''', (nebula_user_id, title))
+        chat_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return chat_id
+
+    def get_chat(self, chat_id: int) -> Optional[Dict]:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT chat_id, nebula_user_id, title, created_at, last_message_at
+            FROM chats WHERE chat_id = ?
+        ''', (chat_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            'chat_id': row[0], 'nebula_user_id': row[1], 'title': row[2],
+            'created_at': row[3], 'last_message_at': row[4]
+        }
+
+    def list_chats(self, nebula_user_id: int) -> List[Dict]:
+        """Ordered by most recently active first, matching what a chat
+        sidebar UI wants (most relevant conversations on top)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT chat_id, nebula_user_id, title, created_at, last_message_at
+            FROM chats WHERE nebula_user_id = ?
+            ORDER BY last_message_at DESC
+        ''', (nebula_user_id,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [
+            {'chat_id': r[0], 'nebula_user_id': r[1], 'title': r[2],
+             'created_at': r[3], 'last_message_at': r[4]}
+            for r in rows
+        ]
+
+    def rename_chat(self, chat_id: int, title: str) -> bool:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE chats SET title = ? WHERE chat_id = ?', (title, chat_id))
+        conn.commit()
+        changed = cursor.rowcount > 0
+        conn.close()
+        return changed
+
+    def touch_chat(self, chat_id: int):
+        """Bump last_message_at to now -- called whenever a message is
+        added to a chat, so list_chats()'s ORDER BY reflects actual
+        recent activity."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE chats SET last_message_at = CURRENT_TIMESTAMP WHERE chat_id = ?', (chat_id,))
+        conn.commit()
+        conn.close()
+
+    def delete_chat(self, chat_id: int):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM conversation_history WHERE chat_id = ?', (chat_id,))
+        cursor.execute('DELETE FROM chats WHERE chat_id = ?', (chat_id,))
+        conn.commit()
+        conn.close()
+
+    # ------------------------------------------------------------------
+    # Conversation memory (per nebula_user_id, cross-platform;
+    # optionally scoped to a web chat_id)
     # ------------------------------------------------------------------
 
     def add_message(self, nebula_user_id: int, role: str, content: str,
-                     source_platform: str, token_count: int = 0):
+                     source_platform: str, token_count: int = 0,
+                     chat_id: Optional[int] = None):
+        """chat_id defaults to None, preserving exact prior behavior for
+        every existing Discord/Telegram call site (none of which pass
+        chat_id) -- those rows land in the legacy chat_id-IS-NULL
+        history exactly as before this migration. Only web call sites
+        pass a real chat_id."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO conversation_history
-            (nebula_user_id, role, content, source_platform, token_count)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (nebula_user_id, role, content, source_platform, token_count))
+            (nebula_user_id, chat_id, role, content, source_platform, token_count)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (nebula_user_id, chat_id, role, content, source_platform, token_count))
         conn.commit()
         conn.close()
+        if chat_id is not None:
+            self.touch_chat(chat_id)
 
-    def get_conversation_history(self, nebula_user_id: int, limit: int = 50) -> List[Dict]:
+    def get_conversation_history(self, nebula_user_id: int, limit: int = 50,
+                                  chat_id: Optional[int] = None) -> List[Dict]:
+        """chat_id=None (default): legacy behavior, unchanged -- returns
+        the account's chat_id-IS-NULL history (Discord/Telegram),
+        exactly as every existing caller already expects. Passing a
+        real chat_id scopes the query to that one web chat instead."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
-            SELECT role, content, source_platform, timestamp, token_count FROM (
-                SELECT id, role, content, source_platform, timestamp, token_count
-                FROM conversation_history
-                WHERE nebula_user_id = ?
-                ORDER BY id DESC
-                LIMIT ?
-            ) ORDER BY id ASC
-        ''', (nebula_user_id, limit))
+        if chat_id is None:
+            cursor.execute('''
+                SELECT role, content, source_platform, timestamp, token_count FROM (
+                    SELECT id, role, content, source_platform, timestamp, token_count
+                    FROM conversation_history
+                    WHERE nebula_user_id = ? AND chat_id IS NULL
+                    ORDER BY id DESC
+                    LIMIT ?
+                ) ORDER BY id ASC
+            ''', (nebula_user_id, limit))
+        else:
+            cursor.execute('''
+                SELECT role, content, source_platform, timestamp, token_count FROM (
+                    SELECT id, role, content, source_platform, timestamp, token_count
+                    FROM conversation_history
+                    WHERE nebula_user_id = ? AND chat_id = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                ) ORDER BY id ASC
+            ''', (nebula_user_id, chat_id, limit))
         rows = cursor.fetchall()
         conn.close()
         return [
@@ -468,23 +658,44 @@ class DatabaseManager:
             for r in rows
         ]
 
-    def get_total_tokens(self, nebula_user_id: int) -> int:
+    def get_total_tokens(self, nebula_user_id: int, chat_id: Optional[int] = None) -> int:
+        """chat_id=None (default): legacy behavior, unchanged -- sums
+        only the account's chat_id-IS-NULL rows (Discord/Telegram's
+        shared 200k cap). Passing a real chat_id sums only that web
+        chat's rows -- each web chat has its OWN independent 200k cap
+        (confirmed with Sina), never pooled with the account-wide
+        Discord/Telegram total or with other web chats."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
-            SELECT SUM(token_count) FROM conversation_history WHERE nebula_user_id = ?
-        ''', (nebula_user_id,))
+        if chat_id is None:
+            cursor.execute('''
+                SELECT SUM(token_count) FROM conversation_history
+                WHERE nebula_user_id = ? AND chat_id IS NULL
+            ''', (nebula_user_id,))
+        else:
+            cursor.execute('''
+                SELECT SUM(token_count) FROM conversation_history
+                WHERE nebula_user_id = ? AND chat_id = ?
+            ''', (nebula_user_id, chat_id))
         result = cursor.fetchone()[0]
         conn.close()
         return result if result else 0
 
-    def reset_conversation(self, nebula_user_id: int):
+    def reset_conversation(self, nebula_user_id: int, chat_id: Optional[int] = None):
+        """chat_id=None (default): legacy behavior, unchanged -- clears
+        only the account's chat_id-IS-NULL history (what /memory_reset
+        on Discord/Telegram has always cleared). Passing a chat_id
+        clears only that one web chat's messages, leaving every other
+        chat (and the Discord/Telegram history) untouched."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM conversation_history WHERE nebula_user_id = ?', (nebula_user_id,))
+        if chat_id is None:
+            cursor.execute('DELETE FROM conversation_history WHERE nebula_user_id = ? AND chat_id IS NULL', (nebula_user_id,))
+        else:
+            cursor.execute('DELETE FROM conversation_history WHERE nebula_user_id = ? AND chat_id = ?', (nebula_user_id, chat_id))
         conn.commit()
         conn.close()
-        print(f"Conversation history reset for nebula_user_id {nebula_user_id}")
+        print(f"Conversation history reset for nebula_user_id {nebula_user_id} (chat_id={chat_id})")
 
     # ------------------------------------------------------------------
     # Admin actions log
@@ -600,3 +811,52 @@ class DatabaseManager:
         conn.commit()
         conn.close()
         return new_balance
+
+    # ------------------------------------------------------------------
+    # OAuth connections (NEW) -- infrastructure only, not wired to any
+    # tool this release. Tokens are stored encrypted (ciphertext in,
+    # ciphertext out) -- see core/crypto.py for the encrypt/decrypt
+    # helpers. This layer never sees plaintext.
+    # ------------------------------------------------------------------
+
+    def upsert_oauth_connection(self, nebula_user_id: int, provider: str,
+                                 access_token_encrypted: str,
+                                 refresh_token_encrypted: Optional[str],
+                                 expires_at: Optional[str], scopes: Optional[str]) -> None:
+        """One row per (nebula_user_id, provider) -- re-running the OAuth
+        flow for a provider a user already connected updates the
+        existing row (fresh tokens, possibly fresh scopes) rather than
+        creating a duplicate, matching how Google's own re-consent flow
+        expects to be handled."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO oauth_connections
+                (nebula_user_id, provider, access_token, refresh_token, expires_at, scopes, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(nebula_user_id, provider) DO UPDATE SET
+                access_token = excluded.access_token,
+                refresh_token = COALESCE(excluded.refresh_token, oauth_connections.refresh_token),
+                expires_at = excluded.expires_at,
+                scopes = excluded.scopes,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (nebula_user_id, provider, access_token_encrypted, refresh_token_encrypted, expires_at, scopes))
+        conn.commit()
+        conn.close()
+
+    def get_oauth_connection(self, nebula_user_id: int, provider: str) -> Optional[Dict]:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT nebula_user_id, provider, access_token, refresh_token, expires_at, scopes, created_at, updated_at
+            FROM oauth_connections WHERE nebula_user_id = ? AND provider = ?
+        ''', (nebula_user_id, provider))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            'nebula_user_id': row[0], 'provider': row[1], 'access_token': row[2],
+            'refresh_token': row[3], 'expires_at': row[4], 'scopes': row[5],
+            'created_at': row[6], 'updated_at': row[7],
+        }

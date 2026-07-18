@@ -1,5 +1,39 @@
 # Nebula Bot - Migration Guide
 
+## Upgrading to Version 1.5.0
+
+Version 1.5.0 adds a **web panel** — a third platform adapter alongside Discord and Telegram — plus infrastructure for future Google integrations. Nothing about your *existing* Discord/Telegram setup needs migrating: your `.env`, your data, and your bots' behavior are all unchanged unless you explicitly opt into the web adapter.
+
+### 1. Database migration is automatic, and existing data is untouched
+
+**What changed:** `conversation_history` gained a new nullable `chat_id` column, and two new tables (`chats`, `oauth_connections`) were added, to support the web panel's multi-chat feature and Google OAuth infrastructure.
+
+**What you need to do:** Nothing. On first startup after upgrading, Nebula automatically runs `ALTER TABLE conversation_history ADD COLUMN chat_id` (guarded so it only runs once, even across restarts) and creates the two new tables. Every existing row in `conversation_history` gets `chat_id = NULL`, which is exactly what makes it keep showing up in your existing Discord/Telegram conversation history — nothing is deleted, reordered, or reinterpreted. If you never enable the web adapter, these new columns/tables simply sit unused.
+
+### 2. The web adapter is off by default — opt in with `WEB_ENABLED=true`
+
+**What changed:** `main.py` can now start a third adapter (a FastAPI backend, meant to be paired with the Next.js frontend) alongside Discord/Telegram, in the same `python main.py` process.
+
+**What you need to do:**
+- Nothing, if you don't want the web panel — leave `WEB_ENABLED` unset (or `false`) and Nebula behaves exactly as before, Discord/Telegram only.
+- To enable it: set `WEB_ENABLED=true`, plus generate and set `JWT_SECRET` and `OAUTH_TOKEN_ENCRYPTION_KEY` (commands to generate both are in the updated `.env.sample`). If `WEB_ENABLED=true` but either of those is missing, Nebula prints a clear startup error and skips the web adapter (Discord/Telegram still start normally if configured) rather than crashing the whole process.
+- Update dependencies: `pip install -r requirements.txt` — it now includes `fastapi`, `uvicorn[standard]`, `pyjwt`, `cryptography`, `python-multipart`, and `httpx`.
+- The web panel's frontend (Next.js) is a separate piece you'll run alongside this — see README.md's updated setup section once the frontend ships.
+
+### 3. Google OAuth is entirely optional
+
+**What changed:** two new endpoints (`/api/v1/auth/google` and its callback) let a web user connect a Google account. This is infrastructure only — no Sheets/Calendar tool uses it yet.
+
+**What you need to do:** nothing, unless you specifically want to test the Google connect flow. If you do, get OAuth credentials from the Google Cloud Console and fill in `GOOGLE_OAUTH_CLIENT_ID`/`GOOGLE_OAUTH_CLIENT_SECRET`/`GOOGLE_OAUTH_REDIRECT_URI` in `.env` (see `.env.sample`'s comments). Leaving these blank just means that one endpoint returns a clear "not configured" error if hit — every other part of Nebula, including the rest of the web panel, works fine without it.
+
+### 4. Multi-chat and per-message image uploads are web-only
+
+**What changed:** the web panel supports multiple independently-named chats per account (each with its own 200k-token memory cap), and real image forwarding to the AI model (not just a text placeholder).
+
+**What you need to do:** nothing on Discord/Telegram — both keep their single continuous conversation and their existing `"[User attached N image(s)]"` text-only image handling, completely unchanged. These are new capabilities specific to the web adapter, not a behavior change for the bots you already run.
+
+---
+
 ## Upgrading to Version 1.4.0
 
 Version 1.4.0 adds support for five more AI providers (Anthropic, Google, xAI, OpenRouter, Groq) alongside OpenAI, via a new provider abstraction layer. Nothing about your *data* needs migrating — no schema changes at all in this release. If you're happy with your current AI setup, you don't need to do anything.
@@ -133,6 +167,11 @@ Version 1.1.0 updated the bot to use the latest OpenAI Python library structure.
 ### Telegram commands aren't showing up
 1. Telegram commands take effect immediately — no propagation delay like Discord's global sync. If they're still not appearing, confirm `TELEGRAM_BOT_TOKEN` is set correctly and check the console for a "Failed to set Telegram command descriptions" warning on startup.
 2. In a group chat, make sure the bot can actually see messages — check Privacy Mode via [@BotFather](https://t.me/BotFather)'s `/setprivacy` if it isn't responding to @mentions there.
+
+### Web adapter won't start
+1. Confirm `WEB_ENABLED=true` AND both `JWT_SECRET` and `OAUTH_TOKEN_ENCRYPTION_KEY` are set — all three are required together (see this file's 1.5.0 section above). Nebula prints exactly which one is missing on startup.
+2. If the port is already in use, change `WEB_PORT` in `.env`.
+3. A 401 on every request from the frontend usually means `JWT_SECRET` changed since the user last logged in (invalidating their token) — they just need to log in again.
 
 ### Database errors
 1. Ensure the bot has write permissions in its directory.

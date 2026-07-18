@@ -45,7 +45,12 @@ ENV PATH="/home/nebula/.local/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# No EXPOSE: Nebula is an outbound-only bot process (Discord gateway /
-# Telegram long-polling), it doesn't listen on any port.
+# Only exposed when WEB_ENABLED=true (see main.py / .env.sample) --
+# Nebula's Discord/Telegram adapters remain outbound-only (gateway /
+# long-polling) and need no port. This EXPOSE is a no-op / harmless
+# documentation-only directive when the web adapter is off; it does
+# NOT publish the port to the host by itself (that still requires
+# `-p 8000:8000` or docker-compose.yml's `ports:`, see that file).
+EXPOSE 8000
 
 ENTRYPOINT ["python", "main.py"]

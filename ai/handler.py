@@ -5,9 +5,9 @@ mixing OpenAI tool-calling logic with discord.Message handling. Now
 split: this module knows nothing about Discord, Telegram, or any
 specific platform. It takes plain values in and returns plain response
 text out. discord_bot/message_listener.py (and telegram_bot's message
-handler) are the thin pieces that know how to turn a platform-native
-message object into a call to handle_turn() and how to send the
-string(s) it returns back on that platform.
+handler, and now web_backend's chat routes) are the thin pieces that
+know how to turn a platform-native message into a call to handle_turn()
+and how to send the string(s) it returns back on that platform.
 
 As of this version, this module also knows nothing about any specific
 AI SDK. Previously it imported AsyncOpenAI directly and called OpenAI's
@@ -25,9 +25,29 @@ docstring for why this can't be abstracted further without losing what
 those actions do). handle_turn() accepts an optional `discord_guild`
 parameter for exactly this — passed straight through to
 tools/moderation.py without this module otherwise touching discord.py.
-A platform that doesn't support guild moderation (Telegram, today)
-simply never passes discord_guild, and the admin tool calls related to
-it are omitted from the toolset (see get_available_tools).
+A platform that doesn't support guild moderation (Telegram, Web) simply
+never passes discord_guild, and the admin tool calls related to it are
+omitted from the toolset (see get_available_tools).
+
+--- Web panel addition: chat_id + images (confirmed with Sina) ---
+
+handle_turn() gains two new optional parameters:
+- chat_id: Optional[int] = None. None (the default) preserves EXACT
+  existing behavior for Discord/Telegram -- every memory/coin/usage
+  call below already threaded chat_id=None through to core/memory.py's
+  new chat-scoped methods, which themselves fall back to the legacy
+  chat_id-IS-NULL history when chat_id is None (see core/memory.py and
+  core/database.py's docstrings for the full rationale). Only
+  web_backend/ ever passes a real chat_id, one per web chat, each with
+  its own independent 200k-token cap.
+- images: Optional[List[ImageAttachment]] = None. None/empty (the
+  default) is a complete no-op -- passed straight through to
+  self.provider.call(), which is itself a no-op when images is falsy
+  (see ai/providers/base.py). Only web_backend's image-upload endpoint
+  ever populates this; Discord/Telegram continue to only send a
+  "[User attached N image(s)]" text note (unchanged, out of scope for
+  this pass -- see discord_bot/message_listener.py's existing known
+  gap note).
 """
 import json
 import os
@@ -39,7 +59,7 @@ from core.memory import MemoryManager
 from core.database import DatabaseManager
 from tools.search import SearchTool
 from tools import moderation
-from ai.providers.base import BaseProvider
+from ai.providers.base import BaseProvider, ImageAttachment
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config.json')
 
@@ -182,18 +202,6 @@ class AIHandler:
                 "removed in a future release. See .env.sample for the new "
                 "variables."
             )
-            # OPENAI_BASE_URL is deliberately still honored here, not just
-            # accepted-and-ignored: this project's own documented setup
-            # (.env.sample, README.md's "AI API Key (Gemini example)"
-            # section) has people point OPENAI_BASE_URL at Gemini's
-            # OpenAI-compatible endpoint. Dropping that override would
-            # silently break that exact, currently-documented setup for
-            # anyone who upgrades without also hand-editing
-            # ai/config.json — which is precisely the kind of silent
-            # breakage this project's error-handling principle exists to
-            # avoid. Flagged to Sina as a point worth re-confirming (see
-            # accompanying summary), but implemented as "still honored"
-            # since undoing it silently seemed like the larger risk.
             legacy_base_url = os.getenv('OPENAI_BASE_URL')
             return _ResolvedProviderConfig(
                 provider_name='openai', api_key=legacy_key,
@@ -229,12 +237,6 @@ class AIHandler:
         temperature = config.get('temperature', 0.7)
         thinking_level = config.get('thinking_level')
 
-        # xai/openrouter/groq have no SDK default endpoint of their own
-        # to fall back to -- unlike openai/anthropic/google, which can
-        # legitimately have base_url=None (their SDKs know their own
-        # default). Catching this here gives a specific, actionable
-        # error instead of that request going to the wrong host (or
-        # OpenAI's own default) with a key that host will reject.
         if resolved.provider_name in ("xai", "openrouter", "groq") and not base_url:
             raise _ProviderConfigError(
                 f"Provider '{resolved.provider_name}' requires a base_url "
@@ -260,22 +262,16 @@ class AIHandler:
                 temperature=temperature, thinking_level=thinking_level,
             )
         else:
-            # Unreachable given _resolve_provider_and_key()'s validation
-            # against KNOWN_PROVIDERS, but explicit failure over a
-            # silent fall-through if KNOWN_PROVIDERS and this if/elif
-            # chain ever drift out of sync with each other.
             raise _ProviderConfigError(f"No provider implementation wired up for '{resolved.provider_name}'.")
 
     def get_admin_notice_if_unconfigured(self) -> Optional[str]:
         """Stateless getter: always returns the same detailed message
         (or None if the provider IS configured), with no "already sent"
-        tracking on this object. Each adapter (discord_bot/, telegram_bot/)
-        keeps its own independent sent-once flag, the same shape as the
-        existing discord_bot/search_command.py's
+        tracking on this object. Each adapter (discord_bot/, telegram_bot/,
+        web_backend/) keeps its own independent sent-once flag, the same
+        shape as the existing discord_bot/search_command.py's
         SearchCommand._admin_notice_sent -- see that class for the
-        pattern this mirrors. Keeping the flag out of AIHandler means
-        neither platform's notification suppresses the other's; each
-        has a fully separate admin audience."""
+        pattern this mirrors."""
         if self.provider is not None:
             return None
         return (
@@ -287,9 +283,9 @@ class AIHandler:
     @staticmethod
     def user_facing_unconfigured_message() -> str:
         """Deliberately generic -- no env var names, no provider names,
-        nothing implementation-specific. A regular Discord/Telegram user
-        hitting this doesn't need (and would likely be confused by)
-        configuration details; that detail goes to admins only, via
+        nothing implementation-specific. A regular Discord/Telegram/Web
+        user hitting this doesn't need (and would likely be confused
+        by) configuration details; that detail goes to admins only, via
         get_admin_notice_if_unconfigured() above."""
         return "⚠️ Nebula's AI isn't configured yet. Please contact a Nebula admin."
 
@@ -310,24 +306,37 @@ class AIHandler:
     # Tools
     # ------------------------------------------------------------------
 
-    def get_available_tools(self, is_admin: bool, supports_guild_moderation: bool) -> List[Dict]:
-        """Unchanged from the pre-refactor version -- still produces
-        OpenAI function-calling format. Each provider's call() is
-        responsible for translating this into its own SDK's tool
-        schema (see ai/providers/anthropic_sdk.py's _to_anthropic_tool
-        and ai/providers/google_sdk.py's _to_genai_tools)."""
-        tools = [{
-            "type": "function",
-            "function": {
-                "name": "search",
-                "description": "Search the web for current information. Only use when user explicitly asks to search for something.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"query": {"type": "string", "description": "The search query"}},
-                    "required": ["query"]
+    def get_available_tools(self, is_admin: bool, supports_guild_moderation: bool,
+                             enable_search: bool = True) -> List[Dict]:
+        """Unchanged from the pre-refactor version for Discord/Telegram
+        -- still produces OpenAI function-calling format, and
+        enable_search defaults to True so neither existing adapter (which
+        never passes this new parameter) sees any behavior change.
+
+        enable_search=False is new, web-only: the confirmed /ai/generate
+        body shape (now living at POST /chat/{id}/messages, see
+        web_backend/routes/chat.py) lets a user toggle per-message
+        whether Nebula is allowed to search, e.g. {"tools": {"search":
+        false}}. Discord/Telegram have no equivalent per-message toggle
+        -- search is simply always offered there, same as before this
+        parameter existed. Each provider's call() is responsible for
+        translating this into its own SDK's tool schema (see
+        ai/providers/anthropic_sdk.py's _to_anthropic_tool and
+        ai/providers/google_sdk.py's _to_genai_tools)."""
+        tools = []
+        if enable_search:
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": "search",
+                    "description": "Search the web for current information. Only use when user explicitly asks to search for something.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string", "description": "The search query"}},
+                        "required": ["query"]
+                    }
                 }
-            }
-        }]
+            })
 
         if is_admin and supports_guild_moderation:
             tools.extend([
@@ -407,6 +416,9 @@ class AIHandler:
         display_name: str,
         message_text: str,
         discord_guild=None,
+        chat_id: Optional[int] = None,
+        images: Optional[List[ImageAttachment]] = None,
+        enable_search: bool = True,
     ) -> TurnResult:
         result = TurnResult()
 
@@ -418,8 +430,13 @@ class AIHandler:
 
         nebula_user_id = identity['nebula_user_id']
 
-        if self.memory.is_full(nebula_user_id):
-            result.blocked_reason = self.memory.full_memory_message(display_name)
+        if self.memory.is_full(nebula_user_id, chat_id=chat_id):
+            if chat_id is not None:
+                chat = self.db.get_chat(chat_id)
+                chat_title = chat['title'] if chat else "this chat"
+                result.blocked_reason = self.memory.full_chat_memory_message(display_name, chat_title)
+            else:
+                result.blocked_reason = self.memory.full_memory_message(display_name)
             return result
 
         if self.coin_manager:
@@ -430,7 +447,7 @@ class AIHandler:
                 )
                 return result
 
-        conversation_history = self.memory.get_conversation_context(nebula_user_id)
+        conversation_history = self.memory.get_conversation_context(nebula_user_id, chat_id=chat_id)
         is_admin = identity['is_admin']
         supports_guild_moderation = discord_guild is not None
 
@@ -442,18 +459,12 @@ class AIHandler:
         # asking): this check happens AFTER coins have already been
         # spent above. A user whose turn fails here because the AI
         # backend isn't configured still loses a coin for that turn.
-        # This was true before this refactor too (the old
-        # `if not self.openai_client:` check was in this same relative
-        # position) -- not something this task changed, and not
-        # something to silently "fix" as a side effect of this
-        # refactor. Flagged again in the accompanying summary as
-        # something to explicitly revisit with Sina if desired.
         if not self.provider:
             result.blocked_reason = self.user_facing_unconfigured_message()
             return result
 
         usage_after_user_msg = await self.memory.add_message_to_memory(
-            nebula_user_id, "user", message_text, source_platform
+            nebula_user_id, "user", message_text, source_platform, chat_id=chat_id
         )
 
         # Bounded, provider-agnostic tool-calling loop. Shape unchanged
@@ -464,11 +475,25 @@ class AIHandler:
         # through self.provider's two normalized methods instead of
         # inline OpenAI-specific code. The loop itself has no idea
         # which SDK is behind self.provider.
+        #
+        # `images` is only ever meaningful on the FIRST call() of a
+        # turn (round one) -- see ai/providers/base.py's docstring.
+        # Passing it unconditionally into every round's call() is safe
+        # because every provider's call() only attaches images to the
+        # LAST message, and on round 2+ the last message is a
+        # synthesized tool-round message, not the original user turn --
+        # so in practice images only ever actually get attached on
+        # round one, but we still only pass it explicitly on round one
+        # below to keep that guarantee obvious at the call site rather
+        # than relying on each provider's internal indexing.
         final_content = None
-        tools = self.get_available_tools(is_admin, supports_guild_moderation)
-        for _ in range(self.MAX_TOOL_ROUNDS):
+        tools = self.get_available_tools(is_admin, supports_guild_moderation, enable_search=enable_search)
+        for round_index in range(self.MAX_TOOL_ROUNDS):
             try:
-                response = await self.provider.call(messages, tools, self.system_prompt)
+                response = await self.provider.call(
+                    messages, tools, self.system_prompt,
+                    images=images if round_index == 0 else None,
+                )
             except Exception as e:
                 print(f"Error calling AI backend: {e}")
                 result.blocked_reason = f"Sorry {display_name}, I encountered an error processing your message. Please try again."
@@ -497,7 +522,7 @@ class AIHandler:
         if final_content:
             result.reply_text = final_content
             await self.memory.add_message_to_memory(
-                nebula_user_id, "assistant", final_content, source_platform
+                nebula_user_id, "assistant", final_content, source_platform, chat_id=chat_id
             )
 
         result.memory_warning = self.memory.approaching_full_warning(usage_after_user_msg)

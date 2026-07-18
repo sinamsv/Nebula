@@ -2,7 +2,7 @@
 package (2.x), NOT the old `google-generativeai` package (confirmed
 decision -- do not swap this for the old package).
 
-Verified against the installed google-genai==2.11.0 package:
+Verified against the installed google-genai==2.12.1 package:
 - genai.Client(api_key=..., http_options=types.HttpOptions(base_url=...))
   is how base_url override works here -- there's no separate base_url
   kwarg on Client() itself the way AsyncOpenAI/AsyncAnthropic have one;
@@ -27,6 +27,10 @@ Verified against the installed google-genai==2.11.0 package:
   append_tool_round() below does still reach into
   candidates[0].content directly, since that's the one native object
   that needs to round-trip unchanged).
+- types.Part.from_bytes(data: bytes, mime_type: str) -> Part is the
+  verified constructor for inline image parts (checked via
+  inspect.signature on the installed package) -- this is what
+  _to_genai_contents() uses below for the image-attachment case.
 
 RESOLVED (was an open question in the original plan -- confirmed via
 SDK inspection + web search, see investigation notes): Gemini's
@@ -57,13 +61,25 @@ thinking_level will be rejected. That's the same category of
 model-capability mismatch already accepted as out-of-scope for
 OpenAI's reasoning_effort (see openai_sdk.py's docstring) -- consistent
 treatment, not a new gap introduced here.
+
+--- Web panel addition: multimodal image input (confirmed with Sina) ---
+
+_to_genai_contents() now accepts an optional `images` list, attached
+ONLY to the last message in the list (the current user turn) --
+mirrors openai_sdk.py / anthropic_sdk.py's "only touch the last
+message" approach, just implemented at the point where messages are
+already being translated into native Content objects one at a time,
+rather than as a separate pre-processing rewrite step (Google's
+translation-on-every-call design made that the more natural insertion
+point here, versus the other two providers where messages are already
+dicts that can be shallow-patched directly).
 """
 from typing import Any, Dict, List, Optional
 
 from google import genai
 from google.genai import types as genai_types
 
-from ai.providers.base import BaseProvider, NormalizedResponse, NormalizedToolCall
+from ai.providers.base import BaseProvider, ImageAttachment, NormalizedResponse, NormalizedToolCall
 
 
 class GoogleSDKProvider(BaseProvider):
@@ -80,8 +96,9 @@ class GoogleSDKProvider(BaseProvider):
         self.thinking_level = thinking_level.upper() if thinking_level else None
 
     async def call(self, messages: List[Dict], tools: List[Dict],
-                    system_prompt: str) -> NormalizedResponse:
-        contents = self._to_genai_contents(messages)
+                    system_prompt: str,
+                    images: Optional[List[ImageAttachment]] = None) -> NormalizedResponse:
+        contents = self._to_genai_contents(messages, images=images)
         genai_tools = self._to_genai_tools(tools) if tools else None
 
         config_kwargs: Dict[str, Any] = {
@@ -164,7 +181,7 @@ class GoogleSDKProvider(BaseProvider):
         return new_messages
 
     @staticmethod
-    def _to_genai_contents(messages: List[Dict]) -> List:
+    def _to_genai_contents(messages: List[Dict], images: Optional[List[ImageAttachment]] = None) -> List:
         """Translate messages into Gemini's contents list. Two input
         shapes are possible here (see BaseProvider.call()'s docstring):
 
@@ -179,17 +196,28 @@ class GoogleSDKProvider(BaseProvider):
            within the same turn's tool-calling loop. These pass through
            untouched; re-wrapping an already-correct Content object
            would double-nest it.
+
+        images: attached only to the LAST plain-dict message in the
+        list (the current user turn) -- mirrors the "only touch the
+        last message" rule the other two providers apply. If the last
+        message is already a native Content object (mid tool-calling
+        loop), images are never attached there; callers only ever pass
+        images on round one, when the last message is still the plain
+        dict form, so this branch is defensive rather than a real
+        runtime path today.
         """
         contents = []
-        for msg in messages:
+        last_index = len(messages) - 1
+        for i, msg in enumerate(messages):
             if isinstance(msg, genai_types.Content):
                 contents.append(msg)
                 continue
             role = "model" if msg["role"] == "assistant" else "user"
-            contents.append(genai_types.Content(
-                role=role,
-                parts=[genai_types.Part(text=msg["content"])],
-            ))
+            parts = [genai_types.Part(text=msg["content"])]
+            if images and i == last_index and role == "user":
+                for img in images:
+                    parts.append(genai_types.Part.from_bytes(data=img.data, mime_type=img.mime_type))
+            contents.append(genai_types.Content(role=role, parts=parts))
         return contents
 
     @staticmethod

@@ -9,36 +9,18 @@ from core.database import DatabaseManager
 USERNAME_PATTERN = re.compile(r'^[a-zA-Z0-9_]{3,32}$')
 MIN_PASSWORD_LENGTH = 8
 
-# --- Cross-platform account sync (see generate_sync_code / verify_sync_code) ---
 SYNC_CODE_LENGTH = 6
 SYNC_CODE_EXPIRY_MINUTES = 10
 
 
 class AuthError(Exception):
-    """Raised for any auth failure with a user-facing message. Cogs should
-    catch this and send str(e) back to the user rather than a stack trace."""
     pass
 
 
 class AuthManager:
-    """Platform-agnostic authentication and account management.
-
-    Design principles (matching the rest of the codebase):
-    - Explicit failure over silent fallback: bad input raises AuthError
-      with a specific reason, never fails silently or falls back to a
-      default account.
-    - Not approved does not mean invisible: an unapproved user gets a
-      clear "pending approval" message, not treated as if they don't
-      have an account at all.
-    """
-
     def __init__(self, db: DatabaseManager):
         self.db = db
         self.bootstrap_api_key = os.getenv('ADMIN_BOOTSTRAP_KEY')
-
-    # ------------------------------------------------------------------
-    # Validation
-    # ------------------------------------------------------------------
 
     def _validate_username(self, username: str):
         if not USERNAME_PATTERN.match(username):
@@ -53,26 +35,10 @@ class AuthManager:
                 f"❌ Password too short. Use at least {MIN_PASSWORD_LENGTH} characters."
             )
 
-    # ------------------------------------------------------------------
-    # Signup / Login
-    # ------------------------------------------------------------------
-
     def signup(self, username: str, password: str, display_name: str,
                platform: str, platform_user_id: str,
                platform_display_name: str = None,
                bootstrap_key: Optional[str] = None) -> Dict:
-        """Create a new Nebula account and link the calling platform
-        identity to it immediately (so the person doesn't have to sign up
-        then separately log in on the same platform).
-
-        If bootstrap_key is provided and matches ADMIN_BOOTSTRAP_KEY, and
-        the bootstrap slot hasn't been claimed yet, this account becomes
-        the first admin and is auto-approved. Otherwise the account is
-        created unapproved and pending review.
-
-        Returns a dict describing the outcome. Raises AuthError on bad
-        input or a taken username.
-        """
         self._validate_username(username)
         self._validate_password(password)
 
@@ -141,10 +107,6 @@ class AuthManager:
 
     def login(self, username: str, password: str, platform: str,
               platform_user_id: str, platform_display_name: str = None) -> Dict:
-        """Verify credentials and link the calling platform identity to the
-        matched Nebula account. Raises AuthError on any failure — wrong
-        username, wrong password, or the platform identity already
-        belonging to someone else."""
         user = self.db.get_user_by_username(username)
         if not user:
             raise AuthError("❌ Incorrect username or password.")
@@ -168,44 +130,13 @@ class AuthManager:
             'is_admin': user['is_admin'],
         }
 
-    # ------------------------------------------------------------------
-    # Cross-platform account linking (sync codes)
-    # ------------------------------------------------------------------
-    #
-    # Direction is deliberately fixed: the code is ISSUED on a platform
-    # where the account is already linked (today: Discord, via /sync),
-    # and CONSUMED on the new platform (today: Telegram, via /verify).
-    # This is not symmetric/pluggable in either direction per call — it
-    # can't be, because Telegram (and most bot platforms) won't let a bot
-    # message a user_id it hasn't received an inbound message from yet.
-    # A future third platform reuses verify_sync_code() the same way
-    # Telegram does; generate_sync_code() is called from whichever
-    # already-linked platform the user is issuing the code FROM.
-
     def generate_sync_code(self, nebula_user_id: int, target_platform: str) -> str:
-        """Generate a one-time numeric code so this Nebula account can be
-        linked to a platform identity on `target_platform` without that
-        platform's bot needing to message the user first. Any
-        previously-issued, still-unconsumed code for this
-        (nebula_user_id, target_platform) pair is invalidated — only the
-        most recently generated code is ever valid, so running /sync
-        twice by mistake doesn't leave two "live" codes to be confused
-        about."""
         code = f"{secrets.randbelow(10 ** SYNC_CODE_LENGTH):0{SYNC_CODE_LENGTH}d}"
         self.db.create_sync_code(nebula_user_id, target_platform, code)
         return code
 
     def verify_sync_code(self, username: str, code: str, target_platform: str,
                           platform_user_id: str, platform_display_name: str = None) -> Dict:
-        """Consume a sync code generated by generate_sync_code() and link
-        platform_user_id (on target_platform) to the Nebula account that
-        issued it.
-
-        Called from the NEW platform's side, where — unlike every other
-        AuthManager method — there is no existing linked session to
-        resolve identity from. That's why `username` is a required,
-        explicit input here: it's the only thing available to look up
-        which account this code belongs to."""
         target = self.db.get_user_by_username(username)
         if not target:
             raise AuthError(f"❌ No Nebula account found with username **{username}**.")
@@ -231,9 +162,6 @@ class AuthManager:
                 "Nebula account. Contact an admin if this seems wrong."
             )
 
-        # Only mark the code consumed AFTER the link succeeds, so a
-        # failed link (already-linked-elsewhere case above) leaves the
-        # code intact for a retry rather than burning it on a failure.
         self.db.consume_sync_code(pending['id'])
 
         return {
@@ -242,10 +170,6 @@ class AuthManager:
             'is_approved': target['is_approved'],
             'is_admin': target['is_admin'],
         }
-
-    # ------------------------------------------------------------------
-    # Identity resolution (used by every message-handling path)
-    # ------------------------------------------------------------------
 
     def resolve_identity(self, platform: str, platform_user_id: str) -> Optional[Dict]:
         return self.db.get_nebula_user_for_platform_identity(platform, platform_user_id)
@@ -264,10 +188,6 @@ class AuthManager:
                 "approves you."
             )
         return identity
-
-    # ------------------------------------------------------------------
-    # Admin: approval workflow
-    # ------------------------------------------------------------------
 
     def approve_user(self, target_username: str, approve: bool, approver_nebula_user_id: int,
                       approver_display_name: str) -> Dict:
@@ -294,12 +214,43 @@ class AuthManager:
             'approved': approve,
         }
 
+    def approve_user_by_id(self, target_nebula_user_id: int, approve: bool,
+                            approver_nebula_user_id: int, approver_display_name: str) -> Dict:
+        """Id-based variant of approve_user(), added for web_backend's
+        POST /admin/users/{id}/review (confirmed shape: path takes an
+        id, not a username). Discord/Telegram's /approve_user command
+        keeps using the username-based approve_user() above unchanged
+        -- this is purely additive, not a replacement, since a Discord
+        slash command naturally has the target's username on hand (an
+        admin can't easily paste a nebula_user_id) while a web
+        pending-users list naturally has the row's id on hand.
+        Delegates to the same DB calls as approve_user() to avoid
+        duplicating the approval logic itself."""
+        target = self.db.get_user_by_id(target_nebula_user_id)
+        if not target:
+            raise AuthError(f"❌ No Nebula account found with id **{target_nebula_user_id}**.")
+
+        changed = self.db.set_user_approval(
+            target['nebula_user_id'], approve, approved_by=approver_nebula_user_id
+        )
+        if not changed:
+            raise AuthError("❌ Could not update approval status. Try again.")
+
+        self.db.log_admin_action(
+            approver_nebula_user_id, approver_display_name,
+            "approve_user" if approve else "reject_user",
+            target['nebula_user_id'], target['display_name'],
+            f"target_username={target['username']}"
+        )
+
+        return {
+            'nebula_user_id': target['nebula_user_id'],
+            'username': target['username'],
+            'approved': approve,
+        }
+
     def list_pending(self, limit: int = 25):
         return self.db.list_pending_users(limit)
-
-    # ------------------------------------------------------------------
-    # Admin: add_admin
-    # ------------------------------------------------------------------
 
     def add_admin(self, target_username: str, granter_nebula_user_id: int,
                   granter_display_name: str) -> Dict:

@@ -1,6 +1,6 @@
 """Anthropic SDK provider.
 
-Verified against the installed anthropic==0.116.0 package (not written
+Verified against the installed anthropic==0.117.0 package (not written
 from memory -- see the investigation this handoff continued):
 - AsyncAnthropic().messages.create() takes system as a top-level string
   param (not a messages[0] entry the way OpenAI does it), plus
@@ -19,13 +19,25 @@ from memory -- see the investigation this handoff continued):
   is a decision for Sina to make explicitly, not something to infer
   silently. thinking_level=None simply omits the `thinking` kwarg
   entirely (verified as valid -- the param's type allows Omit).
+
+Multimodal image support (verified via live inspection of
+anthropic.types.ImageBlockParam / Base64ImageSourceParam in the
+installed package): Anthropic wants image content as
+{"type": "image", "source": {"type": "base64", "media_type": <mime>,
+"data": <b64 str>}} -- separate media_type/data fields, NOT a combined
+data: URL the way OpenAI does it. media_type is a closed enum of
+exactly image/jpeg, image/png, image/gif, image/webp in this SDK
+version -- ai/providers/base.py's ImageAttachment.mime_type is
+documented to match this same set, with web_backend/ responsible for
+rejecting anything else before it reaches this provider.
 """
+import base64
 import json
 from typing import Any, Dict, List, Optional
 
 from anthropic import AsyncAnthropic
 
-from ai.providers.base import BaseProvider, NormalizedResponse, NormalizedToolCall
+from ai.providers.base import BaseProvider, ImageAttachment, NormalizedResponse, NormalizedToolCall
 
 # Confirmed mapping (Sina: "منطقی و خوب هست" -- these three numbers are
 # approved, not placeholders). null is handled separately in __init__
@@ -59,13 +71,18 @@ class AnthropicSDKProvider(BaseProvider):
             self.budget_tokens = _THINKING_LEVEL_TO_BUDGET_TOKENS[thinking_level]
 
     async def call(self, messages: List[Dict], tools: List[Dict],
-                    system_prompt: str) -> NormalizedResponse:
+                    system_prompt: str,
+                    images: Optional[List[ImageAttachment]] = None) -> NormalizedResponse:
         anthropic_tools = [self._to_anthropic_tool(t) for t in tools] if tools else None
+
+        call_messages = list(messages)
+        if images:
+            call_messages[-1] = self._attach_images_to_message(call_messages[-1], images)
 
         kwargs: Dict[str, Any] = {
             "model": self.model,
             "system": system_prompt,
-            "messages": messages,
+            "messages": call_messages,
             "max_tokens": 2000,
             "temperature": self.temperature,
         }
@@ -114,6 +131,27 @@ class AnthropicSDKProvider(BaseProvider):
             tool_calls=normalized_tool_calls,
             raw=response,
         )
+
+    @staticmethod
+    def _attach_images_to_message(message: Dict, images: List[ImageAttachment]) -> Dict:
+        """Rewrite a plain {"role": ..., "content": "<str>"} message
+        into Anthropic's multimodal list-content shape: a text block
+        (the original string content) plus one image block per
+        attachment, base64-encoded with separate media_type/data
+        fields -- the exact shape verified against ImageBlockParam /
+        Base64ImageSourceParam in the installed SDK (see module
+        docstring). Only ever called on the LAST message of a turn."""
+        original_text = message.get("content", "")
+        content_blocks: List[Dict] = []
+        if original_text:
+            content_blocks.append({"type": "text", "text": original_text})
+        for img in images:
+            b64_data = base64.b64encode(img.data).decode("utf-8")
+            content_blocks.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": img.mime_type, "data": b64_data},
+            })
+        return {**message, "content": content_blocks}
 
     def append_tool_round(self, messages: List[Dict], response: NormalizedResponse,
                            tool_results: List[str]) -> List[Dict]:

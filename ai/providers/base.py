@@ -31,10 +31,57 @@ per-provider branch internally, which is exactly the coupling this
 abstraction exists to avoid. Keeping the formatting logic in the
 provider file that already knows the SDK's types is what keeps
 handler.py itself provider-agnostic.
+
+--- Web panel addition: multimodal image input (confirmed with Sina) ---
+
+call() gains a new `images` parameter, a list of ImageAttachment (below).
+Default is None/empty, which is a no-op for Discord/Telegram -- neither
+adapter passes images, so their behavior (and every existing test) is
+completely unchanged. Only the web adapter, from its new
+multipart-image endpoint, ever populates this.
+
+Each provider's call() is responsible for translating the *last* user
+message plus any images into its OWN multimodal content-block shape --
+this is deliberately handled inside call() (not upstream in
+ai/handler.py) for the same reason tool-schema translation already
+lives per-provider: OpenAI/Anthropic/Google each have a genuinely
+different, incompatible shape for "text plus an inline image" content
+blocks, verified via live SDK inspection (not from memory) for all
+three:
+  - OpenAI: a list content value on the message, mixing
+    {"type": "text", ...} and {"type": "image_url", "image_url":
+    {"url": "data:<mime>;base64,<data>"}} parts.
+  - Anthropic: a list content value on the message, mixing
+    {"type": "text", ...} and {"type": "image", "source": {"type":
+    "base64", "media_type": <mime>, "data": <b64 str>}} parts.
+  - Google: genai.types.Part.from_bytes(data=<raw bytes>,
+    mime_type=<mime>) alongside a Part(text=...), inside one Content.
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+
+@dataclass
+class ImageAttachment:
+    """One image to attach to the CURRENT user turn, provider-agnostic.
+
+    data: raw image bytes (not base64-encoded, not a data URL -- each
+    provider's call() does whatever encoding its own SDK needs; keeping
+    this field as raw bytes means the web_backend layer that reads an
+    uploaded file doesn't need to know anything about any provider's
+    preferred encoding).
+
+    mime_type: e.g. "image/jpeg", "image/png", "image/webp", "image/gif"
+    -- the same four types Anthropic's SDK enumerates as valid
+    (verified via live inspection), which in practice is also what
+    OpenAI and Google both accept, so no per-provider allow-list
+    divergence to track here. web_backend/ is responsible for
+    rejecting anything outside this set before it ever reaches a
+    provider (see web_backend's upload validation).
+    """
+    data: bytes
+    mime_type: str
 
 
 @dataclass
@@ -116,6 +163,7 @@ class BaseProvider(ABC):
         messages: List[Dict],
         tools: List[Dict],
         system_prompt: str,
+        images: Optional[List[ImageAttachment]] = None,
     ) -> NormalizedResponse:
         """Make one request to this provider's API and return a
         NormalizedResponse.
@@ -146,6 +194,16 @@ class BaseProvider(ABC):
 
         system_prompt: plain string, loaded once from system.txt by
         ai/handler.py, unchanged from today.
+
+        images: optional list of ImageAttachment to attach to the LAST
+        message in `messages` (i.e. the current user turn). None or
+        empty (the default) is a complete no-op -- every provider's
+        call() must produce byte-for-byte the same request it would
+        have without this parameter when images is falsy, which is
+        what keeps Discord/Telegram (which never pass images)
+        unaffected by this addition. Only meaningful on the FIRST
+        call() of a turn (round one) -- images are never attached to
+        synthetic tool-round messages.
         """
         raise NotImplementedError
 
