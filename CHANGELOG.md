@@ -2,6 +2,17 @@
 
 All notable changes to Nebula will be documented in this file.
 
+## [1.6.0] - 2026-07-20
+
+### Added
+- **Mandatory Web Adapter**: The web adapter (FastAPI backend + Next.js frontend) is now a mandatory core feature of Nebula and initialized unconditionally. The `WEB_ENABLED` toggle has been completely removed.
+- **Root Environment Unification**: Unified all environment variables into the repository root `.env.sample`. The frontend dynamically loads variables (including `NEXT_PUBLIC_API_BASE_URL`) from the root `.env` file at build/development time using the `dotenv` package integrated into `next.config.mjs`.
+
+### Changed
+- **Port Standardization**: Swapped the system's ports to follow standard web conventions: Next.js frontend port set to `8080` (previously `50080`), and the FastAPI/Uvicorn backend port set to `8000` (previously `50051`/`50080` external split).
+- **Backend Fallback Port**: Updated backend port resolution in `main.py` to read `BACKEND_PORT`, falling back to `WEB_PORT`, and defaulting to `8000`.
+- **Git Hygiene and Ignored Cache**: Cleaned up compiled Python bytecode (`__pycache__/`, `*.pyc`) from the repository and added recursive ignore rules to `.gitignore`.
+
 ## [1.5.0] - 2026-07-18
 
 ### Added

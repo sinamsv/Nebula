@@ -1,5 +1,12 @@
 # Nebula Web Frontend
 
+<!--
+Port configuration changes:
+- Updated frontend port references to 8080 and backend port references to 8000.
+- Rationale: simplify and standardize.
+- How to revert: change frontend to 50080 and backend to 50051.
+-->
+
 This is the web UI for Nebula — the part you see in a browser. It talks to the
 Nebula backend (the Python/FastAPI part) over the network; it doesn't contain
 any of Nebula's actual AI logic itself.
@@ -63,11 +70,11 @@ npm run build   # if you haven't already
 npm run start
 ```
 
-This starts a local web server on **port 50080**. Open
-`http://localhost:50080` in your browser.
+This starts a local web server on **port 8080**. Open
+`http://localhost:8080` in your browser.
 
 Note: the frontend needs the Nebula backend to actually be running too (on
-port 50051 by default) for anything beyond the landing page to work — sign
+port 8000 by default) for anything beyond the landing page to work — sign
 up, chat, etc. all make network calls to the backend.
 
 ---
@@ -75,14 +82,14 @@ up, chat, etc. all make network calls to the backend.
 ## Configuration
 
 There's one thing you might ever need to change: where the backend API
-lives. By default, this frontend expects it at `http://localhost:50051/api/v1`.
+lives. By default, this frontend expects it at `http://localhost:8000/api/v1`.
 
 If you ever run the backend somewhere other than your own computer (a
 server, a different port, etc.), copy `.env.sample` to `.env.local` in this
 folder and change the value there:
 
 ```
-NEXT_PUBLIC_API_BASE_URL=http://your-backend-address:50051/api/v1
+NEXT_PUBLIC_API_BASE_URL=http://your-backend-address:8000/api/v1
 ```
 
 Then run `npm run build` again so the change takes effect (this value gets
@@ -129,11 +136,10 @@ again).
 
 **The page loads but nothing works (sign up/log in fails)** — the frontend
 can't reach the backend. Confirm the backend is running (`python main.py`
-from the main Nebula folder, with at minimum `WEB_ENABLED=true` in its
-`.env`) and reachable at the address in `NEXT_PUBLIC_API_BASE_URL` (default
-`http://localhost:50051/api/v1`).
+from the main Nebula folder) and reachable at the address in `NEXT_PUBLIC_API_BASE_URL` (default
+`http://localhost:8000/api/v1`).
 
-**Port 50080 is already in use** — something else on your machine is using
+**Port 8080 is already in use** — something else on your machine is using
 that port. Either stop that other program, or change the port by editing
-the `"start"` line in `package.json` (`next start -p 50080` → a different
+the `"start"` line in `package.json` (`next start -p 8080` → a different
 number), and updating the backend's `WEB_FRONTEND_URL` to match.

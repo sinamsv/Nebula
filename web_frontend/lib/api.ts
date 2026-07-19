@@ -1,4 +1,9 @@
 /**
+ * Port configuration changes:
+ * - Updated default backend fallback port from 50051 to 8000.
+ * - Rationale: align backend default to port 8000.
+ * - How to revert: change "http://localhost:8000/api/v1" back to "http://localhost:50051/api/v1".
+ *
  * Single typed wrapper around every Nebula backend endpoint. Nothing
  * else in this project should call fetch() directly against the API --
  * components import functions from here instead, so the base URL,
@@ -32,7 +37,7 @@ import type {
 import { ApiError } from "@/types/api";
 
 export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:50051/api/v1";
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
 /** Where the backend itself lives, without the /api/v1 suffix --
  * needed for the two Google OAuth endpoints, which are real browser

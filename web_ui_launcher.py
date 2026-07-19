@@ -1,4 +1,9 @@
-"""Nebula web UI launcher — glue code to start the Next.js frontend
+"""Port configuration changes:
+- Frontend port: updated to 8080 (changed from 50080).
+- Rationale: simplify and standardize.
+- How to revert: change port references back to 50080.
+
+Nebula web UI launcher — glue code to start the Next.js frontend
 (web_frontend/) as a subprocess from main.py, alongside Discord,
 Telegram, and the FastAPI web adapter.
 
@@ -48,7 +53,7 @@ failure.
 
 PORTS: the frontend is started via `npm run start`, which (per
 web_frontend/package.json's own "start" script) already binds to port
-50080 — see web_frontend/package.json. Nothing in this module needs to
+# 8080 — see web_frontend/package.json. Nothing in this module needs to
 know the port number itself; it just runs the npm script.
 """
 import asyncio
@@ -101,7 +106,7 @@ async def _start_web_ui():
     """Awaitable coroutine, same shape as main.py's existing
     _start_web_adapter() — safe to add directly to the same
     asyncio.gather(...) call. Runs `npm run start` (the frontend's
-    production server, bound to port 50080 per package.json) as a
+    production server, bound to port 8080 per package.json) as a
     subprocess, and streams its stdout/stderr to this process's own
     console rather than silently swallowing frontend logs, so
     frontend errors are visible in the same place as every other
@@ -113,7 +118,7 @@ async def _start_web_ui():
         print("Skipping the web UI subprocess; every other configured adapter will still start normally.")
         return
 
-    print("Web UI configured — starting Next.js frontend on port 50080.")
+    print("Web UI configured — starting Next.js frontend on port 8080.")
 
     # npm.cmd on Windows, npm everywhere else -- asyncio.create_subprocess_exec
     # does NOT go through a shell by default (unlike subprocess.run with

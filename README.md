@@ -102,12 +102,11 @@ pip install -r requirements.txt
 cp .env.sample .env
 ```
 
-2. Edit `.env` and fill in your credentials. At minimum, you need `AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL`, `ADMIN_BOOTSTRAP_KEY`, and **at least one** of `DISCORD_TOKEN` / `TELEGRAM_BOT_TOKEN` / `WEB_ENABLED`:
+2. Edit `.env` and fill in your credentials. At minimum, you need `AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL`, `ADMIN_BOOTSTRAP_KEY`. Note that the **web panel is mandatory** and always active, while Discord and Telegram remain optional:
 
 ```env
 DISCORD_TOKEN=your_discord_bot_token_here
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-WEB_ENABLED=false
 AI_PROVIDER=google
 AI_API_KEY=your_api_key_here
 AI_MODEL=gemini-2.0-flash-001
@@ -126,12 +125,12 @@ ADMIN_BOOTSTRAP_KEY=  # generate per the instructions in .env.sample
 2. Send `/newbot` and follow the prompts (choose a name and a username ending in `bot`)
 3. BotFather gives you a token that looks like `123456789:AAExampleTokenTextGoesHere` — copy it into `TELEGRAM_BOT_TOKEN`
 
-#### Web Panel (optional third adapter):
-1. Set `WEB_ENABLED=true`.
+#### Web Panel (Mandatory):
+1. The web adapter is a core system feature and is always active.
 2. Generate `JWT_SECRET`: `python3 -c "import secrets; print(secrets.token_urlsafe(64))"`
 3. Generate `OAUTH_TOKEN_ENCRYPTION_KEY`: `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
 4. (Optional) Fill in `GOOGLE_OAUTH_CLIENT_ID`/`SECRET`/`REDIRECT_URI` if you want to enable Google Sign-In/Connect — see [Google Cloud Console](https://console.cloud.google.com/apis/credentials).
-5. The API serves on `WEB_PORT` (default `8000`). Pair it with the Next.js frontend, pointed at this API's base URL.
+5. The API serves on `BACKEND_PORT` (default `8000`). Pair it with the Next.js frontend, pointed at this API's base URL.
 
 You don't need all three adapters — set whichever platform(s) you actually want to run. Nebula starts every adapter it's configured for and skips the rest.
 
@@ -328,7 +327,7 @@ Schema is organized around **Nebula accounts**, not guilds, channels, or web ses
 - **Web**: no artificial split — JSON response bodies, rendered by the frontend as-is.
 
 ### Web Panel
-- `WEB_ENABLED`, `WEB_PORT`, `WEB_FRONTEND_URL`, `JWT_SECRET`, `OAUTH_TOKEN_ENCRYPTION_KEY` — see `.env.sample`.
+- `BACKEND_PORT`, `FRONTEND_PORT`, `WEB_FRONTEND_URL`, `JWT_SECRET`, `OAUTH_TOKEN_ENCRYPTION_KEY` — see `.env.sample`.
 - Google OAuth (optional): `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`.
 
 ## 🔒 Permissions Required

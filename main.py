@@ -1,4 +1,10 @@
-"""Nebula — top-level launcher.
+"""Port and Web Gating Changes:
+- Made web adapter mandatory: the `WEB_ENABLED` toggle is removed; the FastAPI web panel starts unconditionally.
+- Backend port fallback: resolves `BACKEND_PORT`, then `WEB_PORT`, defaulting to `8000`.
+- Rationale: simplify deployments by making the central web panel a core, mandatory system.
+- How to revert: restore the WEB_ENABLED env checks and reset the port variables.
+
+Nebula — top-level launcher.
 
 This is the ONE file you run: `python main.py`.
 
@@ -65,7 +71,7 @@ async def _start_web_adapter(db, auth, memory, coins, ai_handler):
     from web_backend.app import create_app
 
     app = create_app(db, auth, memory, coins, ai_handler)
-    port = int(os.getenv('WEB_PORT', '8000'))
+    port = int(os.getenv('BACKEND_PORT', os.getenv('WEB_PORT', '8000')))
     config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
     server = uvicorn.Server(config)
     print(f"Web adapter configured — starting on port {port}.")
@@ -105,25 +111,22 @@ async def main():
     else:
         print("TELEGRAM_BOT_TOKEN not set — Telegram adapter disabled.")
 
-    web_enabled = os.getenv('WEB_ENABLED', '').strip().lower() in ('1', 'true', 'yes')
-    if web_enabled:
-        missing = [v for v in ('JWT_SECRET', 'OAUTH_TOKEN_ENCRYPTION_KEY') if not os.getenv(v)]
-        if missing:
-            print(
-                f"ERROR: WEB_ENABLED is true but {', '.join(missing)} "
-                f"{'is' if len(missing) == 1 else 'are'} not set — web adapter cannot start. "
-                "See .env.sample for how to generate these."
-            )
-        else:
-            tasks.append(_start_web_adapter(db, auth, memory, coins, ai_handler))
+    # Web adapter is mandatory. Always initialize web features unconditionally.
+    missing = [v for v in ('JWT_SECRET', 'OAUTH_TOKEN_ENCRYPTION_KEY') if not os.getenv(v)]
+    if missing:
+        print(
+            f"ERROR: Web adapter is mandatory but {', '.join(missing)} "
+            f"{'is' if len(missing) == 1 else 'are'} not set — web adapter cannot start. "
+            "See .env.sample for how to generate these."
+        )
     else:
-        print("WEB_ENABLED not set — Web adapter disabled.")
+        tasks.append(_start_web_adapter(db, auth, memory, coins, ai_handler))
 
     if not tasks:
         print(
-            "ERROR: No platform adapters are configured. Set DISCORD_TOKEN, "
-            "TELEGRAM_BOT_TOKEN, and/or WEB_ENABLED in your .env file — "
-            "Nebula has nothing to run."
+            "ERROR: No platform adapters are running. Ensure that "
+            "JWT_SECRET and OAUTH_TOKEN_ENCRYPTION_KEY are configured in your .env file "
+            "so the mandatory web adapter can start."
         )
         return
 
