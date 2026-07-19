@@ -164,7 +164,14 @@ Edit `system.txt` to customize Nebula's personality and behavior — shared acro
 python main.py
 ```
 
-This starts every adapter you've configured, concurrently — Discord, Telegram, and/or the web API, all under one process. Check the console output to confirm which one(s) came up. If you enabled the web adapter, also start the Next.js frontend separately, pointed at `http://localhost:<WEB_PORT>` (or wherever you're serving the API).
+This starts the entire multi-platform ecosystem (Discord, Telegram, Web API, and the Next.js Web UI frontend) concurrently under a single, unified Python process.
+
+On startup, `main.py` automatically orchestrates:
+- Checking for missing or outdated Node.js dependencies in `web_frontend/` and running `npm install` automatically if needed.
+- Checking for the production build (`.next/`) and running `npm run build` automatically if it is missing.
+- Executing the frontend using `npm run start` (or `npm run dev` in local development if `NODE_ENV=development` is set).
+
+All Next.js logs are forwarded and clearly prefixed directly to your Python console logs for easy debugging.
 
 ## 🎯 Usage
 
