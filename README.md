@@ -95,6 +95,16 @@ cd Nebula
 pip install -r requirements.txt
 ```
 
+### PaaS Startup (Railway, Render, Fly.io, Heroku, etc.)
+
+For PaaS users, `main.py` is responsible only for Python services. Do not start the frontend from inside Python. Instead, set the Start Command on your PaaS platform to:
+
+```sh
+/bin/sh -c "python main.py & cd web_frontend && npm run start"
+```
+
+This command launches the Python backend in the background and starts the Next.js production server concurrently, keeping the services properly managed.
+
 ### 3. Configure Environment Variables
 
 1. Copy `.env.sample` to `.env`:
@@ -160,18 +170,20 @@ Edit `system.txt` to customize Nebula's personality and behavior — shared acro
 
 ### 6. Run Nebula
 
+For local development, we provide a unified `start.sh` script:
+
 ```bash
-python main.py
+./start.sh
 ```
 
-This starts the entire multi-platform ecosystem (Discord, Telegram, Web API, and the Next.js Web UI frontend) concurrently under a single, unified Python process.
+This script will:
+- Read your `.env` variables.
+- Automatically detect whether Next.js dependencies/build are missing inside `web_frontend/` and run `npm install` and `npm run build` automatically as needed.
+- Concurrently start the Python backend and Next.js frontend, and gracefully terminate both when stopped.
 
-On startup, `main.py` automatically orchestrates:
-- Checking for missing or outdated Node.js dependencies in `web_frontend/` and running `npm install` automatically if needed.
-- Checking for the production build (`.next/`) and running `npm run build` automatically if it is missing.
-- Executing the frontend using `npm run start` (or `npm run dev` in local development if `NODE_ENV=development` is set).
-
-All Next.js logs are forwarded and clearly prefixed directly to your Python console logs for easy debugging.
+Alternatively, you can run the components manually in separate terminals:
+- Backend: `python main.py`
+- Frontend: `cd web_frontend && npm run dev`
 
 ## 🎯 Usage
 

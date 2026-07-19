@@ -49,7 +49,7 @@ class FakeProvider(BaseProvider):
         self.call_count = 0
         self.append_tool_round_calls = []
 
-    async def call(self, messages, tools, system_prompt):
+    async def call(self, messages, tools, system_prompt, images=None):
         response = self._responses[self.call_count]
         self.call_count += 1
         return response

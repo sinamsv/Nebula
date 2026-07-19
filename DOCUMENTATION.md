@@ -44,7 +44,7 @@ The one deliberate exception (at the platform-adapter layer) is guild moderation
 
 ### Component Responsibilities
 
-- **main.py**: constructs every shared instance once, starts every adapter with a configured token/flag via `asyncio.gather()` — including the web adapter, served in-process via `uvicorn.Server` rather than a separate process.
+- **main.py**: constructs every shared instance once, starts every adapter with a configured token/flag via `asyncio.gather()` — including the web adapter, served in-process via `uvicorn.Server` rather than a separate process. The Next.js frontend is no longer started from `main.py`.
 - **core/database.py**: SQLite abstraction for every table (accounts, platform links, sync codes, memory, coins, admin log, web chats, OAuth connections).
 - **core/auth.py**: signup/login/approval (both username-based, for Discord/Telegram/web forms, and id-based via `approve_user_by_id()`, for the web admin review endpoint), plus the `/sync` → `/verify` cross-platform linking flow.
 - **core/memory.py**: per-account conversation memory and the 200k-token cap — either account-wide (Discord/Telegram) or per-web-chat, depending on whether a `chat_id` is passed.
@@ -261,6 +261,16 @@ See README.md's Database Schema table for the full list. Everything hangs off `n
 3. On Telegram, `/signup` and `/login` necessarily put a password in the chat's own message history — Nebula shows a clear warning after each of these telling you to delete that message yourself. Discord avoids this via ephemeral slash command parameters; the web panel avoids it entirely since passwords travel over HTTPS in a request body, never rendered into any persisted chat log.
 4. Sync codes (`/sync` → `/verify`, from Discord or web) expire after 10 minutes and are single-use.
 5. Losing `OAUTH_TOKEN_ENCRYPTION_KEY` permanently loses the ability to decrypt already-stored Google tokens — acceptable, since a user can simply reconnect Google, but avoid losing it carelessly regardless.
+
+### PaaS Deployment & Startup
+
+For PaaS users, `main.py` is responsible ONLY for the Python services. Do not start the frontend from inside Python. Instead, use this Start Command on your PaaS platform (such as Railway):
+
+```sh
+/bin/sh -c "python main.py & cd web_frontend && npm run start"
+```
+
+This starts the backend in the background and launches Next.js production server concurrently.
 
 ### Performance
 1. Prefer the model-driven natural-language interface over direct commands where both exist.
