@@ -1,5 +1,10 @@
 # syntax=docker/dockerfile:1
 
+# Port configuration changes:
+# - Set frontend exposed port to 8080.
+# - Rationale: align with port 8080 standard.
+# - How to revert: change NEXT_PUBLIC_API_BASE_URL back to 50051 and EXPOSE to 50080.
+
 # ---- Python build stage: compile wheels so the final image doesn't need gcc/build tools ----
 FROM python:3.11-slim AS py-builder
 
@@ -39,7 +44,7 @@ COPY web_frontend/ ./
 # editing this file, while still defaulting to the confirmed backend
 # port (50051) for the common case of both services running in the
 # same container/host.
-ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:50051/api/v1
+ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
 ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
 RUN npm run build
 
@@ -106,15 +111,10 @@ ENV PATH="/home/nebula/.local/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# 8000: the FastAPI backend (WEB_ENABLED=true, see .env.sample) — only
-# meaningful when that adapter is on; harmless no-op documentation
-# otherwise.
-# 50080: the Next.js frontend (WEB_UI_ENABLED=true) — see
-# web_frontend/package.json's "start" script, which binds here.
-# Neither EXPOSE line publishes anything to the host by itself; that
-# still requires `-p` flags or docker-compose.yml's `ports:` (see that
-# file, updated alongside this one).
+# Port configuration:
+# 8000: the FastAPI backend — only meaningful when that adapter is running.
+# 8080: the Next.js frontend — see web_frontend/package.json's "start" script, which binds here.
 EXPOSE 8000
-EXPOSE 50080
+EXPOSE 8080
 
 ENTRYPOINT ["python", "main.py"]

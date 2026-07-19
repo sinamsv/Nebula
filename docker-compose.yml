@@ -1,3 +1,8 @@
+# Port configuration changes:
+# - Swap backend external port from 50051 to 8000.
+# - Swap frontend external port from 50080 to 8080.
+# - Rationale: align with standard web and FastAPI port conventions (8000/8080).
+# - How to revert: change NEXT_PUBLIC_API_BASE_URL back to 50051, and ports back to 50051:8000 and 50080:50080.
 name: nebula
 
 services:
@@ -9,12 +14,12 @@ services:
         # Baked into the frontend's compiled JS at image-build time
         # (see Dockerfile's frontend-builder stage) -- this is the
         # address the BROWSER will call, not an internal container
-        # address. Left at localhost:50051 by default since the
+        # address. Left at localhost:8000 by default since the
         # common case is "browser and backend both reachable via
         # localhost on the host machine running Docker". If you
         # deploy this somewhere the backend has a different public
         # address, override this build arg (see README note below).
-        NEXT_PUBLIC_API_BASE_URL: http://localhost:50051/api/v1
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
     # For local dev, build from source. To instead run the published
     # image from GHCR, comment out `build:` above and uncomment:
     # image: ghcr.io/sinamsv/nebulabot:latest
@@ -36,18 +41,12 @@ services:
       # this volume mount has nothing to actually persist.
       - DB_PATH=/app/data/nebula.db
     ports:
-      # 8000 (WEB_ENABLED=true): the FastAPI backend, mapped to the
-      # confirmed external port 50051 -- i.e. the backend listens on
-      # 8000 *inside* the container (unchanged from main.py's
-      # WEB_PORT default), but is reachable from your machine at
-      # 50051, matching every NEXT_PUBLIC_API_BASE_URL reference.
-      # If you ever change WEB_PORT in .env away from 8000, update
-      # the left-hand side here to match.
-      - "50051:8000"
-      # 50080 (WEB_UI_ENABLED=true): the Next.js frontend, same port
-      # inside and outside the container (see
-      # web_frontend/package.json's "start" script).
-      - "50080:50080"
+      # 8000: the FastAPI backend, mapped to external port 8000.
+      # The backend listens on 8000 inside the container and is reachable
+      # from your machine at 8000, matching NEXT_PUBLIC_API_BASE_URL reference.
+      - "8000:8000"
+      # 8080: the Next.js frontend, mapped to external port 8080.
+      - "8080:8080"
       # Both lines are harmless no-ops if the corresponding adapter is
       # left disabled in .env -- an unused published port on a
       # container that never listens on it doesn't cause errors.

@@ -10,15 +10,14 @@ Version 1.5.0 adds a **web panel** — a third platform adapter alongside Discor
 
 **What you need to do:** Nothing. On first startup after upgrading, Nebula automatically runs `ALTER TABLE conversation_history ADD COLUMN chat_id` (guarded so it only runs once, even across restarts) and creates the two new tables. Every existing row in `conversation_history` gets `chat_id = NULL`, which is exactly what makes it keep showing up in your existing Discord/Telegram conversation history — nothing is deleted, reordered, or reinterpreted. If you never enable the web adapter, these new columns/tables simply sit unused.
 
-### 2. The web adapter is off by default — opt in with `WEB_ENABLED=true`
+### 2. The web adapter is mandatory
 
-**What changed:** `main.py` can now start a third adapter (a FastAPI backend, meant to be paired with the Next.js frontend) alongside Discord/Telegram, in the same `python main.py` process.
+**What changed:** The web adapter (the FastAPI backend paired with the Next.js frontend) is now a mandatory core feature and always active. The `WEB_ENABLED` environment toggle has been removed.
 
 **What you need to do:**
-- Nothing, if you don't want the web panel — leave `WEB_ENABLED` unset (or `false`) and Nebula behaves exactly as before, Discord/Telegram only.
-- To enable it: set `WEB_ENABLED=true`, plus generate and set `JWT_SECRET` and `OAUTH_TOKEN_ENCRYPTION_KEY` (commands to generate both are in the updated `.env.sample`). If `WEB_ENABLED=true` but either of those is missing, Nebula prints a clear startup error and skips the web adapter (Discord/Telegram still start normally if configured) rather than crashing the whole process.
-- Update dependencies: `pip install -r requirements.txt` — it now includes `fastapi`, `uvicorn[standard]`, `pyjwt`, `cryptography`, `python-multipart`, and `httpx`.
-- The web panel's frontend (Next.js) is a separate piece you'll run alongside this — see README.md's updated setup section once the frontend ships.
+- Ensure that `JWT_SECRET` and `OAUTH_TOKEN_ENCRYPTION_KEY` are configured in your `.env` file (commands to generate both are in `.env.sample`). If they are missing, Nebula will print a clear error on startup since the web adapter is mandatory.
+- Update dependencies: `pip install -r requirements.txt` — it includes `fastapi`, `uvicorn[standard]`, `pyjwt`, `cryptography`, `python-multipart`, and `httpx`.
+- The web panel's frontend (Next.js) is run on port `8080` (updated from `50080`), and the backend is on `8000` (updated from `50051`).
 
 ### 3. Google OAuth is entirely optional
 
@@ -169,8 +168,8 @@ Version 1.1.0 updated the bot to use the latest OpenAI Python library structure.
 2. In a group chat, make sure the bot can actually see messages — check Privacy Mode via [@BotFather](https://t.me/BotFather)'s `/setprivacy` if it isn't responding to @mentions there.
 
 ### Web adapter won't start
-1. Confirm `WEB_ENABLED=true` AND both `JWT_SECRET` and `OAUTH_TOKEN_ENCRYPTION_KEY` are set — all three are required together (see this file's 1.5.0 section above). Nebula prints exactly which one is missing on startup.
-2. If the port is already in use, change `WEB_PORT` in `.env`.
+1. Confirm both `JWT_SECRET` and `OAUTH_TOKEN_ENCRYPTION_KEY` are set — both are required together (see this file's 1.5.0 section above) since the web adapter is mandatory. Nebula prints exactly which one is missing on startup.
+2. If the port is already in use, change `BACKEND_PORT` in `.env`.
 3. A 401 on every request from the frontend usually means `JWT_SECRET` changed since the user last logged in (invalidating their token) — they just need to log in again.
 
 ### Database errors
