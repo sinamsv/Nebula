@@ -1,8 +1,23 @@
-# Port configuration changes:
-# - Swap backend external port from 50051 to 8000.
-# - Swap frontend external port from 50080 to 8080.
-# - Rationale: align with standard web and FastAPI port conventions (8000/8080).
-# - How to revert: change NEXT_PUBLIC_API_BASE_URL back to 50051, and ports back to 50051:8000 and 50080:50080.
+# Railway / PaaS Deployment Changes (v1.6.1):
+# - Only publish port 8080 (Next.js) -- FastAPI (8000) is internal-only
+#   since v1.6.1, reached only via Next.js's rewrites() proxy over
+#   localhost inside the container (see main.py and
+#   web_frontend/next.config.mjs). Publishing 8000 externally used to be
+#   misleading (the browser was never meant to call it directly) and, on
+#   real PaaS platforms like Railway, simply isn't possible anyway (they
+#   only route to one port per service).
+# - NEXT_PUBLIC_API_BASE_URL build arg now defaults to the relative
+#   "/api/v1" path, matching .env.sample and web_frontend/lib/api.ts's
+#   own new default -- no absolute backend URL to keep in sync anymore.
+# - How to revert: republish "8000:8000", and set the build arg back to
+#   an absolute "http://localhost:8000/api/v1" URL.
+#
+# NOTE: this docker-compose.yml is for LOCAL/self-hosted use (a single
+# machine running both services via Docker). Railway does not use this
+# file directly -- Railway builds straight from the Dockerfile and reads
+# env vars from its own dashboard/CLI, not from a mounted .env or this
+# compose file's `environment:`/`env_file:` blocks. Keep this file around
+# for anyone self-hosting via `docker compose up`.
 name: nebula
 
 services:
@@ -12,14 +27,13 @@ services:
       dockerfile: Dockerfile
       args:
         # Baked into the frontend's compiled JS at image-build time
-        # (see Dockerfile's frontend-builder stage) -- this is the
-        # address the BROWSER will call, not an internal container
-        # address. Left at localhost:8000 by default since the
-        # common case is "browser and backend both reachable via
-        # localhost on the host machine running Docker". If you
-        # deploy this somewhere the backend has a different public
-        # address, override this build arg (see README note below).
-        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
+        # (see Dockerfile's frontend-builder stage) -- relative by
+        # default so the SAME built image works correctly no matter
+        # which host/port/domain it ends up served from. Only change
+        # this to an absolute URL if you're intentionally bypassing
+        # the rewrites() proxy (e.g. frontend and backend deployed as
+        # fully separate services).
+        NEXT_PUBLIC_API_BASE_URL: /api/v1
     # For local dev, build from source. To instead run the published
     # image from GHCR, comment out `build:` above and uncomment:
     # image: ghcr.io/sinamsv/nebulabot:latest
@@ -36,20 +50,16 @@ services:
       - nebula-data:/app/data
     environment:
       # Requires main.py to read DB_PATH via os.getenv() — see
-      # main.py.patch. Without that one-line change, SQLite falls back
+      # core/database.py's default. Without this, SQLite falls back
       # to ./nebula.db inside the container's ephemeral filesystem and
       # this volume mount has nothing to actually persist.
       - DB_PATH=/app/data/nebula.db
     ports:
-      # 8000: the FastAPI backend, mapped to external port 8000.
-      # The backend listens on 8000 inside the container and is reachable
-      # from your machine at 8000, matching NEXT_PUBLIC_API_BASE_URL reference.
-      - "8000:8000"
-      # 8080: the Next.js frontend, mapped to external port 8080.
+      # 8080: the Next.js frontend -- the ONLY port that needs to be
+      # published. It's the single public entrypoint; FastAPI (8000)
+      # is reached only from inside the container via Next.js's own
+      # rewrites() proxy and is intentionally not published here.
       - "8080:8080"
-      # Both lines are harmless no-ops if the corresponding adapter is
-      # left disabled in .env -- an unused published port on a
-      # container that never listens on it doesn't cause errors.
 
 volumes:
   nebula-data:

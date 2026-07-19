@@ -1,8 +1,16 @@
 /**
- * Port configuration changes:
- * - Updated default backend fallback port from 50051 to 8000.
- * - Rationale: align backend default to port 8000.
- * - How to revert: change "http://localhost:8000/api/v1" back to "http://localhost:50051/api/v1".
+ * Railway / PaaS single-port proxy changes (v1.6.1):
+ * - Default base URL is now a RELATIVE path ("/api/v1"), not a full
+ *   "http://host:port" URL. Next.js's own rewrites() proxy (see
+ *   next.config.mjs) forwards every /api/v1/* request to FastAPI
+ *   internally, so the browser only ever needs to know about its own
+ *   current origin -- whatever that is (localhost:8080 locally, the
+ *   Railway domain in production) -- with no separate backend host/
+ *   port to configure or keep in sync.
+ * - How to revert: change the default back to a full
+ *   "http://localhost:8000/api/v1" URL (only meaningful if you're
+ *   intentionally NOT using the rewrites() proxy -- e.g. frontend and
+ *   backend genuinely deployed as separate, unproxied services).
  *
  * Single typed wrapper around every Nebula backend endpoint. Nothing
  * else in this project should call fetch() directly against the API --
@@ -11,7 +19,7 @@
  *
  * Base URL: read from NEXT_PUBLIC_API_BASE_URL (baked in at build
  * time by Next.js, since it's a browser-visible env var), defaulting
- * to the confirmed backend port 50051.
+ * to the relative "/api/v1" path described above.
  */
 import type {
   BootstrapStatusResponse,
@@ -37,11 +45,14 @@ import type {
 import { ApiError } from "@/types/api";
 
 export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/v1";
 
 /** Where the backend itself lives, without the /api/v1 suffix --
  * needed for the two Google OAuth endpoints, which are real browser
- * navigations (not fetch calls) and use the same base. */
+ * navigations (not fetch calls) and use the same base. With the
+ * default relative API_BASE_URL, this resolves relative to Next.js's
+ * own current origin (via the rewrites() proxy), same as every other
+ * API call. */
 function apiRoot(): string {
   return API_BASE_URL;
 }
@@ -143,7 +154,9 @@ export function login(body: LoginRequest): Promise<LoginResponse> {
  * Google's OAuth flow requires the user's actual browser to visit
  * Google's consent screen and be redirected back. Components should
  * set `window.location.href = googleOAuthStartUrl()`, not call these
- * with fetch(). */
+ * with fetch(). With the relative API_BASE_URL default, this resolves
+ * against Next.js's own origin, which the rewrites() proxy then
+ * forwards through to FastAPI's real /auth/google route. */
 export function googleOAuthStartUrl(): string {
   return `${apiRoot()}/auth/google`;
 }

@@ -1,8 +1,25 @@
-"""Port and Web Gating Changes:
-- Made web adapter mandatory: the `WEB_ENABLED` toggle is removed; the FastAPI web panel starts unconditionally.
-- Backend port fallback: resolves `BACKEND_PORT`, then `WEB_PORT`, defaulting to `8000`.
-- Rationale: simplify deployments by making the central web panel a core, mandatory system.
-- How to revert: restore the WEB_ENABLED env checks and reset the port variables.
+"""Railway / PaaS Deployment Changes (v1.6.1):
+- Single public port: PaaS platforms like Railway inject a `PORT` env var and only expose
+  THAT port publicly. Next.js (the frontend) now binds to `PORT` (default 8080 for local/
+  non-PaaS use) since it's the thing that needs to be reachable from the outside world.
+- FastAPI becomes an internal-only service: it always binds to `BACKEND_PORT` (default 8000)
+  on 127.0.0.1 -- never exposed directly. The browser never talks to it directly either;
+  see web_frontend/next.config.mjs's new rewrites() block, which proxies /api/v1/* from
+  Next.js straight to FastAPI over localhost. This sidesteps Railway's one-public-port
+  constraint without needing a second Railway service or an nginx layer.
+- Runtime npm install/build REMOVED: this used to check for missing node_modules/.next and
+  install/build them at process startup, which does not work well on PaaS (ephemeral/
+  read-only-ish filesystems, slow cold starts, healthcheck timeouts while npm installs).
+  The build is now expected to have already happened in the Docker image (see Dockerfile's
+  frontend-builder stage, unchanged) -- main.py's job here is just to START the already-built
+  frontend with `npm run start`, nothing more. Local (non-Docker) development still needs the
+  one-time `npm install && npm run build` described in web_frontend/README.md -- that hasn't
+  changed, only the automatic "do it for you at every startup" behavior is gone.
+- Explicit 0.0.0.0 bind for Next.js: `next start -p <port> -H 0.0.0.0` -- Next's default host
+  binding (localhost) is not reachable from outside a container even if the port is correct.
+- How to revert: restore the old _should_install_deps/_update_last_installed_state/build-check
+  block inside _start_web_ui(), and go back to reading BACKEND_PORT/WEB_PORT only (no PORT
+  fallback) for whichever service you want to expose.
 
 Nebula — top-level launcher.
 
@@ -17,29 +34,29 @@ panel) for the SAME Nebula account read and write through the exact
 same objects, not siloed copies of the same sqlite file.
 
 Each adapter is independently optional: whichever of DISCORD_TOKEN /
-TELEGRAM_BOT_TOKEN / WEB_ENABLED is set in .env determines which
-adapter(s) actually start. All three, some, or (if none are set)
-none — with an explicit error in that last case rather than silently
-doing nothing, matching this project's "explicit failure over silent
-fallback" principle everywhere else (see core/auth.py, core/memory.py,
-tools/search.py).
+TELEGRAM_BOT_TOKEN is set in .env determines which adapter(s) actually
+start. The web adapter (FastAPI + Next.js) is mandatory and always
+starts. Explicit error if literally nothing can start, rather than
+silently doing nothing, matching this project's "explicit failure over
+silent fallback" principle everywhere else (see core/auth.py,
+core/memory.py, tools/search.py).
 
 --- Web adapter addition ---
 
-Confirmed with Sina: the web adapter (FastAPI + uvicorn, serving
-web_backend/app.py's app) gets its own entry in this same asyncio.gather()
-alongside Discord/Telegram, run as an in-process ASGI server via
-uvicorn.Server rather than a separate `uvicorn web_backend.app:app`
-process/command. This keeps the "one file you run: python main.py"
-promise intact for the backend -- the ONLY separate process a person
-running Nebula needs to think about is the Next.js frontend itself
-(a genuinely different runtime, Node.js vs Python, which can't share
-this event loop regardless), not the API server.
+The web adapter (FastAPI + uvicorn, serving web_backend/app.py's app)
+gets its own entry in this same asyncio.gather() alongside Discord/
+Telegram, run as an in-process ASGI server via uvicorn.Server rather
+than a separate `uvicorn web_backend.app:app` process/command. This
+keeps the "one file you run: python main.py" promise intact for the
+backend -- the ONLY separate process a person running Nebula needs to
+think about is the Next.js frontend itself (a genuinely different
+runtime, Node.js vs Python, which can't share this event loop
+regardless), not the API server.
 
-Gating: WEB_ENABLED=true (plus JWT_SECRET and OAUTH_TOKEN_ENCRYPTION_KEY,
-both required for web_backend/app.py's create_app() to succeed) turns
-the web adapter on, mirroring how DISCORD_TOKEN / TELEGRAM_BOT_TOKEN
-already gate their adapters. WEB_PORT (default 8000) picks the port.
+Since v1.6.1, FastAPI is internal-only (127.0.0.1:BACKEND_PORT) and
+Next.js is the single public-facing process, proxying API calls to
+FastAPI itself via next.config.mjs's rewrites -- see the module
+docstring above for the full rationale.
 """
 import asyncio
 import os
@@ -60,40 +77,7 @@ import discord_bot.client as discord_client
 import telegram_bot.client as telegram_client
 
 
-def _should_install_deps(frontend_dir: str) -> bool:
-    """
-    Returns True if packages need to be installed.
-    Checks if node_modules is missing or if package.json has been modified since the last installation.
-    """
-    node_modules_path = os.path.join(frontend_dir, "node_modules")
-    if not os.path.isdir(node_modules_path):
-        return True
-
-    package_json_path = os.path.join(frontend_dir, "package.json")
-    state_file_path = os.path.join(frontend_dir, ".package_json_last_installed")
-
-    if not os.path.exists(package_json_path):
-        return False
-
-    if not os.path.exists(state_file_path):
-        return True
-
-    return os.path.getmtime(package_json_path) > os.path.getmtime(state_file_path)
-
-
-def _update_last_installed_state(frontend_dir: str):
-    """
-    Writes a dummy state file to mark the last successful package installation time.
-    """
-    state_file_path = os.path.join(frontend_dir, ".package_json_last_installed")
-    try:
-        with open(state_file_path, "w") as f:
-            f.write("installed")
-    except Exception as e:
-        print(f"Warning: could not write installation state file: {e}")
-
-
-async def _run_subprocess_with_logging(cmd: list, cwd: str, prefix: str) -> int:
+async def _run_subprocess_with_logging(cmd: list, cwd: str, prefix: str, env: dict = None) -> int:
     """
     Executes a command asynchronously, streaming and forwarding stdout/stderr to the console with a prefix.
     Supports clean termination and process group isolation to prevent zombie processes on PaaS/Railway.
@@ -116,7 +100,8 @@ async def _run_subprocess_with_logging(cmd: list, cwd: str, prefix: str) -> int:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             preexec_fn=preexec,
-            creationflags=creationflags
+            creationflags=creationflags,
+            env=env,
         )
 
         assert process.stdout is not None
@@ -155,12 +140,39 @@ async def _run_subprocess_with_logging(cmd: list, cwd: str, prefix: str) -> int:
         return -1
 
 
-async def _start_web_ui():
+def _resolve_public_port() -> int:
+    """The ONE port that must be publicly reachable. PaaS platforms
+    (Railway, Render, Fly.io, Heroku, ...) inject PORT and only route
+    external traffic to it -- takes priority over anything else if
+    set. Falls back to FRONTEND_PORT (this project's own historical
+    default, 8080) for local/non-PaaS runs where nothing injects PORT."""
+    port = os.getenv('PORT')
+    if port:
+        return int(port)
+    return int(os.getenv('FRONTEND_PORT', '8080'))
+
+
+def _resolve_internal_backend_port() -> int:
+    """FastAPI's port. Since v1.6.1 this is NEVER the publicly exposed
+    port on PaaS -- it only needs to be reachable from Next.js's own
+    rewrites() proxy, which runs in the same container over
+    localhost. Defaults to 8000, unchanged from before."""
+    return int(os.getenv('BACKEND_PORT', os.getenv('WEB_PORT', '8000')))
+
+
+async def _start_web_ui(public_port: int):
     """
-    Automates installation, building, and running of the Next.js frontend (web_frontend).
-    Concurrently handles npm install (if package.json changed or node_modules missing)
-    and executes npm run dev or npm run start based on NODE_ENV.
-    Stdout/stderr logs from Next.js are neatly piped and forwarded to Python console logs.
+    Starts the ALREADY-BUILT Next.js frontend with `npm run start`
+    (or `npm run dev` if NODE_ENV=development), bound to the public
+    port Railway/any PaaS expects and to 0.0.0.0 so it's reachable
+    from outside the container.
+
+    Deliberately does NOT install dependencies or run a production
+    build anymore -- see this module's docstring for why. If
+    node_modules or .next/ are missing, this now fails loudly with a
+    clear message instead of silently attempting a slow runtime
+    install, which is exactly the "explicit failure over silent
+    fallback" principle this project already uses everywhere else.
     """
     frontend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web_frontend")
 
@@ -168,54 +180,72 @@ async def _start_web_ui():
         print(f"ERROR: Web UI directory not found at {frontend_dir}. Skipping Next.js startup.")
         return
 
+    node_modules_path = os.path.join(frontend_dir, "node_modules")
     npm_executable = "npm.cmd" if sys.platform == "win32" else "npm"
 
-    # 1. Dependency installation check
-    if _should_install_deps(frontend_dir):
-        print("[web_frontend] Missing or outdated dependencies. Running 'npm install'...")
-        code = await _run_subprocess_with_logging([npm_executable, "install"], cwd=frontend_dir, prefix="[web_frontend:install]")
-        if code != 0:
-            print(f"ERROR: 'npm install' failed with exit code {code}. Cannot start Web UI.")
-            return
-        _update_last_installed_state(frontend_dir)
-        print("[web_frontend] 'npm install' completed successfully.")
-
-    # 2. Production build check (if not in development mode)
     node_env = os.getenv("NODE_ENV", "production").strip().lower()
     is_dev = node_env == "development"
+
+    if not os.path.isdir(node_modules_path):
+        print(
+            "ERROR: web_frontend/node_modules is missing. This project no longer runs "
+            "'npm install' automatically at startup (see main.py's module docstring for why "
+            "-- this broke PaaS deployments). Run 'npm install' inside web_frontend/ yourself "
+            "(or rebuild the Docker image, which already does this in its frontend-builder "
+            "stage). Skipping Next.js startup."
+        )
+        return
 
     if not is_dev:
         next_dir = os.path.join(frontend_dir, ".next")
         if not os.path.isdir(next_dir):
-            print("[web_frontend] No production build found (.next/ missing). Running 'npm run build'...")
-            code = await _run_subprocess_with_logging([npm_executable, "run", "build"], cwd=frontend_dir, prefix="[web_frontend:build]")
-            if code != 0:
-                print(f"ERROR: 'npm run build' failed with exit code {code}. Cannot start Web UI.")
-                return
-            print("[web_frontend] 'npm run build' completed successfully.")
+            print(
+                "ERROR: web_frontend/.next (production build) is missing and NODE_ENV is not "
+                "'development'. This project no longer runs 'npm run build' automatically at "
+                "startup. Run 'npm run build' inside web_frontend/ yourself (or rebuild the "
+                "Docker image, which already does this in its frontend-builder stage). "
+                "Skipping Next.js startup."
+            )
+            return
 
-    # 3. Execution
+    # web_frontend/package.json's "start"/"dev" scripts read PORT
+    # themselves (falling back to 8080 locally) and always bind
+    # 0.0.0.0 -- see that file's comments. We just need to make sure
+    # PORT is actually set in this subprocess's environment to the
+    # resolved public_port (which already accounts for Railway's
+    # injected PORT, or the FRONTEND_PORT/8080 local default).
     run_cmd = "dev" if is_dev else "start"
-    print(f"Web UI configured — starting Next.js frontend via 'npm run {run_cmd}' on port 8080.")
-    await _run_subprocess_with_logging([npm_executable, "run", run_cmd], cwd=frontend_dir, prefix="[web_frontend]")
+    child_env = dict(os.environ)
+    child_env['PORT'] = str(public_port)
+
+    print(f"Web UI configured — starting Next.js frontend via 'npm run {run_cmd}' on 0.0.0.0:{public_port}.")
+    await _run_subprocess_with_logging(
+        [npm_executable, "run", run_cmd], cwd=frontend_dir, prefix="[web_frontend]", env=child_env
+    )
 
 
-async def _start_web_adapter(db, auth, memory, coins, ai_handler):
+async def _start_web_adapter(db, auth, memory, coins, ai_handler, internal_port: int):
     """Constructs web_backend's FastAPI app and serves it in-process via
     uvicorn.Server.serve() -- an awaitable coroutine, same shape as
     discord_client.start() and telegram_client.start(), so it slots
     into the same asyncio.gather() call below without needing its own
-    event loop (uvicorn.run() would try to own the loop itself, which
-    is exactly what discord_bot/client.py's start() docstring already
-    explains must be avoided when multiple adapters share one loop)."""
+    event loop.
+
+    Since v1.6.1: bound to 127.0.0.1 only, not 0.0.0.0. FastAPI is no
+    longer meant to be reachable from outside the container directly
+    -- Next.js's rewrites() proxy (see web_frontend/next.config.mjs)
+    is the only thing that talks to it, over localhost, from inside
+    the same container. This is what lets one Railway service (one
+    public port) serve both the API and the UI without a second
+    service or a separate reverse-proxy process.
+    """
     import uvicorn
     from web_backend.app import create_app
 
     app = create_app(db, auth, memory, coins, ai_handler)
-    port = int(os.getenv('BACKEND_PORT', os.getenv('WEB_PORT', '8000')))
-    config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
+    config = uvicorn.Config(app, host="127.0.0.1", port=internal_port, log_level="info")
     server = uvicorn.Server(config)
-    print(f"Web adapter configured — starting on port {port}.")
+    print(f"Web adapter configured — starting internally on 127.0.0.1:{internal_port} (not publicly exposed).")
     await server.serve()
 
 
@@ -253,6 +283,9 @@ async def main():
         print("TELEGRAM_BOT_TOKEN not set — Telegram adapter disabled.")
 
     # Web adapter is mandatory. Always initialize web features unconditionally.
+    public_port = _resolve_public_port()
+    internal_backend_port = _resolve_internal_backend_port()
+
     missing = [v for v in ('JWT_SECRET', 'OAUTH_TOKEN_ENCRYPTION_KEY') if not os.getenv(v)]
     if missing:
         print(
@@ -261,10 +294,13 @@ async def main():
             "See .env.sample for how to generate these."
         )
     else:
-        tasks.append(_start_web_adapter(db, auth, memory, coins, ai_handler))
+        tasks.append(_start_web_adapter(db, auth, memory, coins, ai_handler, internal_backend_port))
 
-    # Next.js web frontend adapter is started unconditionally
-    tasks.append(_start_web_ui())
+    # Next.js is the single public-facing process on PaaS: it binds to
+    # PORT (Railway's convention) and proxies /api/v1/* to FastAPI
+    # over localhost via next.config.mjs's rewrites(). Started
+    # unconditionally, same as before.
+    tasks.append(_start_web_ui(public_port))
 
     if not tasks:
         print(
