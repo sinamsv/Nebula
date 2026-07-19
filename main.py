@@ -43,6 +43,7 @@ already gate their adapters. WEB_PORT (default 8000) picks the port.
 """
 import asyncio
 import os
+import sys
 
 from dotenv import load_dotenv
 
@@ -57,6 +58,146 @@ from ai.handler import AIHandler
 
 import discord_bot.client as discord_client
 import telegram_bot.client as telegram_client
+
+
+def _should_install_deps(frontend_dir: str) -> bool:
+    """
+    Returns True if packages need to be installed.
+    Checks if node_modules is missing or if package.json has been modified since the last installation.
+    """
+    node_modules_path = os.path.join(frontend_dir, "node_modules")
+    if not os.path.isdir(node_modules_path):
+        return True
+
+    package_json_path = os.path.join(frontend_dir, "package.json")
+    state_file_path = os.path.join(frontend_dir, ".package_json_last_installed")
+
+    if not os.path.exists(package_json_path):
+        return False
+
+    if not os.path.exists(state_file_path):
+        return True
+
+    return os.path.getmtime(package_json_path) > os.path.getmtime(state_file_path)
+
+
+def _update_last_installed_state(frontend_dir: str):
+    """
+    Writes a dummy state file to mark the last successful package installation time.
+    """
+    state_file_path = os.path.join(frontend_dir, ".package_json_last_installed")
+    try:
+        with open(state_file_path, "w") as f:
+            f.write("installed")
+    except Exception as e:
+        print(f"Warning: could not write installation state file: {e}")
+
+
+async def _run_subprocess_with_logging(cmd: list, cwd: str, prefix: str) -> int:
+    """
+    Executes a command asynchronously, streaming and forwarding stdout/stderr to the console with a prefix.
+    Supports clean termination and process group isolation to prevent zombie processes on PaaS/Railway.
+    """
+    import subprocess
+    import signal
+
+    preexec = None
+    creationflags = 0
+    if sys.platform != "win32":
+        preexec = os.setsid
+    else:
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
+
+    process = None
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            preexec_fn=preexec,
+            creationflags=creationflags
+        )
+
+        assert process.stdout is not None
+        async for raw_line in process.stdout:
+            line = raw_line.decode(errors="replace").rstrip()
+            print(f"{prefix} {line}")
+
+        returncode = await process.wait()
+        return returncode
+    except asyncio.CancelledError:
+        if process and process.returncode is None:
+            print(f"{prefix} Terminating subprocess (PID {process.pid})...")
+            try:
+                if sys.platform != "win32":
+                    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                    for _ in range(30):
+                        if process.returncode is not None:
+                            break
+                        await asyncio.sleep(0.1)
+                    if process.returncode is None:
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                else:
+                    process.terminate()
+                    await process.wait()
+            except Exception as e:
+                print(f"{prefix} Error cleaning up subprocess: {e}")
+        raise
+    except Exception as e:
+        print(f"{prefix} Subprocess execution error: {e}")
+        if process and process.returncode is None:
+            try:
+                process.terminate()
+                await process.wait()
+            except Exception:
+                pass
+        return -1
+
+
+async def _start_web_ui():
+    """
+    Automates installation, building, and running of the Next.js frontend (web_frontend).
+    Concurrently handles npm install (if package.json changed or node_modules missing)
+    and executes npm run dev or npm run start based on NODE_ENV.
+    Stdout/stderr logs from Next.js are neatly piped and forwarded to Python console logs.
+    """
+    frontend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web_frontend")
+
+    if not os.path.isdir(frontend_dir):
+        print(f"ERROR: Web UI directory not found at {frontend_dir}. Skipping Next.js startup.")
+        return
+
+    npm_executable = "npm.cmd" if sys.platform == "win32" else "npm"
+
+    # 1. Dependency installation check
+    if _should_install_deps(frontend_dir):
+        print("[web_frontend] Missing or outdated dependencies. Running 'npm install'...")
+        code = await _run_subprocess_with_logging([npm_executable, "install"], cwd=frontend_dir, prefix="[web_frontend:install]")
+        if code != 0:
+            print(f"ERROR: 'npm install' failed with exit code {code}. Cannot start Web UI.")
+            return
+        _update_last_installed_state(frontend_dir)
+        print("[web_frontend] 'npm install' completed successfully.")
+
+    # 2. Production build check (if not in development mode)
+    node_env = os.getenv("NODE_ENV", "production").strip().lower()
+    is_dev = node_env == "development"
+
+    if not is_dev:
+        next_dir = os.path.join(frontend_dir, ".next")
+        if not os.path.isdir(next_dir):
+            print("[web_frontend] No production build found (.next/ missing). Running 'npm run build'...")
+            code = await _run_subprocess_with_logging([npm_executable, "run", "build"], cwd=frontend_dir, prefix="[web_frontend:build]")
+            if code != 0:
+                print(f"ERROR: 'npm run build' failed with exit code {code}. Cannot start Web UI.")
+                return
+            print("[web_frontend] 'npm run build' completed successfully.")
+
+    # 3. Execution
+    run_cmd = "dev" if is_dev else "start"
+    print(f"Web UI configured — starting Next.js frontend via 'npm run {run_cmd}' on port 8080.")
+    await _run_subprocess_with_logging([npm_executable, "run", run_cmd], cwd=frontend_dir, prefix="[web_frontend]")
 
 
 async def _start_web_adapter(db, auth, memory, coins, ai_handler):
@@ -122,6 +263,9 @@ async def main():
     else:
         tasks.append(_start_web_adapter(db, auth, memory, coins, ai_handler))
 
+    # Next.js web frontend adapter is started unconditionally
+    tasks.append(_start_web_ui())
+
     if not tasks:
         print(
             "ERROR: No platform adapters are running. Ensure that "
@@ -130,7 +274,53 @@ async def main():
         )
         return
 
-    await asyncio.gather(*tasks)
+    loop = asyncio.get_running_loop()
+    shutdown_event = asyncio.Event()
+
+    def handle_signal():
+        print("Received termination signal. Triggering graceful shutdown...")
+        shutdown_event.set()
+
+    if sys.platform != "win32":
+        import signal
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, handle_signal)
+            except Exception as e:
+                print(f"Warning: could not register signal handler for {sig}: {e}")
+
+    gather_task = asyncio.create_task(asyncio.gather(*tasks))
+
+    try:
+        if sys.platform != "win32":
+            await asyncio.wait(
+                [gather_task, shutdown_event.wait()],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            if shutdown_event.is_set():
+                print("Graceful shutdown initiated. Cancelling active tasks...")
+                gather_task.cancel()
+                try:
+                    await gather_task
+                except asyncio.CancelledError:
+                    pass
+        else:
+            await gather_task
+    except asyncio.CancelledError:
+        gather_task.cancel()
+        try:
+            await gather_task
+        except asyncio.CancelledError:
+            pass
+        raise
+    finally:
+        if not gather_task.done():
+            gather_task.cancel()
+            try:
+                await gather_task
+            except Exception:
+                pass
+        print("All processes cleaned up. Exiting main.")
 
 
 if __name__ == "__main__":

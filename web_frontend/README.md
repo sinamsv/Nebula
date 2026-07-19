@@ -44,19 +44,14 @@ starting Nebula normally will bring the UI up automatically — see below.
 
 ## Running it automatically with `python main.py`
 
-If you set `WEB_UI_ENABLED=true` in Nebula's `.env` file (see the backend's
-`.env.sample`), the backend's `main.py` will start this frontend for you
-automatically, as part of the same `python main.py` command you already use
-to run everything else. You do **not** need to open a second terminal or run
-`npm run start` yourself.
+Running `python main.py` starts the entire multi-platform ecosystem—including this Next.js web frontend—automatically and concurrently under a single Python process context.
 
-This only works if you've already done the one-time `npm install && npm run
-build` step above — `main.py` can start the already-built frontend, but it
-can't install dependencies or build it for you the first time.
+`main.py` fully orchestrates the startup process:
+1. It automatically checks if `node_modules` is missing or if `package.json` was modified since the last run, executing `npm install` automatically when needed.
+2. It checks if the production build directory (`.next/`) is missing, and triggers `npm run build` automatically when needed.
+3. It starts the frontend server using `npm run start` (or `npm run dev` in local development if `NODE_ENV=development` is set).
 
-If something's missing, `main.py`'s console output will tell you exactly
-which command to run — look for a line starting with `ERROR: Web UI cannot
-start`.
+All Next.js logs are forwarded and clearly prefixed directly to your Python console logs for easy debugging. You do **not** need to open a second terminal or run `npm run start` yourself.
 
 ---
 
