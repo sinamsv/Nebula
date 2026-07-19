@@ -1,0 +1,48 @@
+# =====================================================================
+# ADDITIONS for the web frontend (append these to the existing
+# .env.sample — do not replace the whole file, this is a diff/addition
+# only, since .env.sample already has everything else confirmed and
+# working from the backend session).
+# =====================================================================
+
+# --- Web UI (optional: the Next.js frontend, launched automatically
+# alongside the backend when running via `python main.py` or Docker) ---
+#
+# WEB_UI_ENABLED=true tells main.py to also launch the frontend
+# (web_frontend/) as a subprocess, in-process alongside Discord/
+# Telegram/the API adapter -- see web_ui_launcher.py's docstring for
+# exactly how this is wired in.
+#
+# Requires WEB_ENABLED=true too (the frontend calls the backend API --
+# running the UI without the API being on doesn't do anything useful).
+#
+# NOT running in Docker: requires a one-time
+#     cd web_frontend && npm install && npm run build
+# before this will work -- see web_frontend/README.md.
+#
+# Running in Docker: nothing extra needed. The provided Dockerfile
+# already runs `npm install` and `npm run build` for you at
+# image-build time, so the container has everything it needs baked in
+# the moment it starts.
+WEB_UI_ENABLED=false
+
+# --- Port mapping note (Docker users only) ---
+#
+# Inside the container, the backend API always listens on the port set
+# by WEB_PORT below (default 8000, unchanged from before) -- that part
+# is NOT new. What's new: docker-compose.yml now maps that internal
+# port to 50051 on your machine (`"50051:8000"`), and separately
+# publishes the frontend's port 50080. This means:
+#   - From your browser: the API is at http://localhost:50051
+#   - From your browser: the UI is at  http://localhost:50080
+#   - Inside the container, main.py/the frontend still talk about port
+#     8000 for the API (via WEB_PORT below) -- 50051 only exists as
+#     the HOST-side mapping in docker-compose.yml, you never need to
+#     set WEB_PORT=50051 yourself.
+#
+# If you're NOT using Docker (running `python main.py` directly on
+# your own machine), there's no such internal/external split -- just
+# set WEB_PORT=50051 directly below if you want the API on that exact
+# port, and make sure web_frontend/.env.local's
+# NEXT_PUBLIC_API_BASE_URL points at whatever port you actually chose.
+WEB_PORT=8000

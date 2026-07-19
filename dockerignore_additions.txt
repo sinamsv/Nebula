@@ -1,0 +1,24 @@
+# =====================================================================
+# ADDITIONS for .dockerignore (append to the existing .dockerignore at
+# the repo root -- do not replace the whole file).
+#
+# WHY THIS MATTERS: Docker sends everything NOT excluded here to the
+# build daemon as the "build context" before any COPY instruction
+# runs. web_frontend/node_modules and web_frontend/.next can be very
+# large (hundreds of MB, per the frontend README) if you've ever run
+# `npm install`/`npm run build` locally on your own machine outside
+# Docker -- without these two lines, every `docker build` would
+# uselessly upload all of that, then the Dockerfile's own
+# frontend-builder stage would rebuild them again FROM SCRATCH inside
+# the container anyway (this is intentional and correct — a clean,
+# reproducible build shouldn't depend on whatever happens to exist on
+# your host machine). These lines just stop the large, irrelevant
+# local copies from slowing down every `docker build` unnecessarily.
+# =====================================================================
+
+# Frontend build artifacts -- rebuilt fresh inside Docker's
+# frontend-builder stage every time (see Dockerfile), never needed
+# from the host.
+web_frontend/node_modules
+web_frontend/.next
+web_frontend/.env.local

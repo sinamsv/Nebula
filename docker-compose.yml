@@ -5,6 +5,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Baked into the frontend's compiled JS at image-build time
+        # (see Dockerfile's frontend-builder stage) -- this is the
+        # address the BROWSER will call, not an internal container
+        # address. Left at localhost:50051 by default since the
+        # common case is "browser and backend both reachable via
+        # localhost on the host machine running Docker". If you
+        # deploy this somewhere the backend has a different public
+        # address, override this build arg (see README note below).
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:50051/api/v1
     # For local dev, build from source. To instead run the published
     # image from GHCR, comment out `build:` above and uncomment:
     # image: ghcr.io/sinamsv/nebulabot:latest
@@ -26,14 +36,21 @@ services:
       # this volume mount has nothing to actually persist.
       - DB_PATH=/app/data/nebula.db
     ports:
-      # Only meaningful when WEB_ENABLED=true in .env (see .env.sample)
-      # -- Discord/Telegram need no published port at all (outbound-only
-      # gateway/long-polling connections). Left unconditional here
-      # (rather than a separate compose profile) since an unused
-      # published port on a container that never listens is harmless;
-      # keeping one compose file (no separate web-only override file)
-      # was the confirmed, simpler choice for this pass.
-      - "${WEB_PORT:-8000}:8000"
+      # 8000 (WEB_ENABLED=true): the FastAPI backend, mapped to the
+      # confirmed external port 50051 -- i.e. the backend listens on
+      # 8000 *inside* the container (unchanged from main.py's
+      # WEB_PORT default), but is reachable from your machine at
+      # 50051, matching every NEXT_PUBLIC_API_BASE_URL reference.
+      # If you ever change WEB_PORT in .env away from 8000, update
+      # the left-hand side here to match.
+      - "50051:8000"
+      # 50080 (WEB_UI_ENABLED=true): the Next.js frontend, same port
+      # inside and outside the container (see
+      # web_frontend/package.json's "start" script).
+      - "50080:50080"
+      # Both lines are harmless no-ops if the corresponding adapter is
+      # left disabled in .env -- an unused published port on a
+      # container that never listens on it doesn't cause errors.
 
 volumes:
   nebula-data:
