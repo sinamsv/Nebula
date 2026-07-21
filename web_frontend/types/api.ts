@@ -71,8 +71,15 @@ export interface ChatHistoryResponse {
   messages: ChatMessage[];
 }
 
+/** Mirrors the backend's ToolToggles.search Literal type
+ * (web_backend/schemas/chat.py) -- "off" never offers the search
+ * tool, "smart" (default) lets the model decide for itself, "on"
+ * biases the model toward actually searching when the message
+ * plausibly needs it (see ai/handler.py's _SEARCH_ON_INSTRUCTION). */
+export type SearchMode = "on" | "off" | "smart";
+
 export interface ToolToggles {
-  search: boolean;
+  search: SearchMode;
 }
 
 export interface SendMessageRequest {

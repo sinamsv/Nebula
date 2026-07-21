@@ -189,11 +189,15 @@ export function deleteChat(token: string, chatId: number): Promise<void> {
   return request<void>(`/chat/${chatId}`, { method: "DELETE", token });
 }
 
+// NOTE: default value updated to match the new 3-state SearchMode
+// type ("on" | "off" | "smart") -- the old default was { search: true },
+// which no longer type-checks now that ToolToggles.search is a
+// SearchMode string, not a boolean (see types/api.ts).
 export function sendMessage(
   token: string,
   chatId: number,
   input: string,
-  tools: ToolToggles = { search: true }
+  tools: ToolToggles = { search: "smart" }
 ): Promise<SendMessageResponse> {
   return request<SendMessageResponse>(`/chat/${chatId}/messages`, {
     method: "POST",
