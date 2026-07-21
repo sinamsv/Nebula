@@ -27,10 +27,25 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
               : "border border-white/10 bg-white/[0.04] text-nebula-text"
           )}
         >
+          {/*
+            dir="auto" lets the browser pick RTL/LTR per-element based
+            on the first strong-directionality character it finds --
+            this is what makes a Persian/Arabic message (or an
+            assistant reply mixing Persian and English words) render
+            with the right alignment and punctuation order, without
+            us having to detect the language ourselves. Applied on
+            both the user bubble's <p> and the assistant's markdown
+            wrapper (below) rather than on the whole chat column, so
+            a Persian message and an English message sitting right
+            next to each other in the same conversation each get
+            their own correct direction independently.
+          */}
           {isUser ? (
-            <p className="whitespace-pre-wrap">{message.content}</p>
+            <p dir="auto" className="whitespace-pre-wrap">
+              {message.content}
+            </p>
           ) : (
-            <div className="markdown-body">
+            <div dir="auto" className="markdown-body">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
             </div>
           )}

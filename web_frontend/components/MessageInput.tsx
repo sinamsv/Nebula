@@ -1,21 +1,23 @@
 "use client";
 
 import { useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
-import { Send, Image as ImageIcon, X, Search } from "lucide-react";
+import { Send, Image as ImageIcon, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import SearchModeButton from "@/components/SearchModeButton";
+import type { SearchMode } from "@/types/api";
 
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB, matches backend limit
 
 interface MessageInputProps {
-  onSendText: (text: string, searchEnabled: boolean) => void;
+  onSendText: (text: string, searchMode: SearchMode) => void;
   onSendImage: (file: File, text: string) => void;
   disabled: boolean;
 }
 
 export default function MessageInput({ onSendText, onSendImage, disabled }: MessageInputProps) {
   const [text, setText] = useState("");
-  const [searchEnabled, setSearchEnabled] = useState(true);
+  const [searchMode, setSearchMode] = useState<SearchMode>("smart");
   const [attachedImage, setAttachedImage] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
@@ -60,7 +62,7 @@ export default function MessageInput({ onSendText, onSendImage, disabled }: Mess
     }
 
     if (!trimmed) return;
-    onSendText(trimmed, searchEnabled);
+    onSendText(trimmed, searchMode);
     setText("");
   }
 
@@ -117,20 +119,7 @@ export default function MessageInput({ onSendText, onSendImage, disabled }: Mess
           <ImageIcon className="h-4 w-4" />
         </button>
 
-        <button
-          onClick={() => setSearchEnabled((v) => !v)}
-          disabled={disabled}
-          title={searchEnabled ? "Search is ON — click to disable" : "Search is OFF — click to enable"}
-          className={cn(
-            "flex h-10 flex-shrink-0 items-center gap-1.5 rounded-xl border px-3 text-xs font-medium transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50",
-            searchEnabled
-              ? "border-nebula-blue/40 bg-nebula-blue/15 text-nebula-blue"
-              : "border-white/10 bg-white/5 text-nebula-text-secondary hover:bg-white/10"
-          )}
-        >
-          <Search className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Search {searchEnabled ? "on" : "off"}</span>
-        </button>
+        <SearchModeButton mode={searchMode} onChange={setSearchMode} disabled={disabled} />
 
         <textarea
           value={text}
@@ -138,6 +127,7 @@ export default function MessageInput({ onSendText, onSendImage, disabled }: Mess
           onKeyDown={handleKeyDown}
           disabled={disabled}
           rows={1}
+          dir="auto"
           placeholder={attachedImage ? "Add a caption (optional)..." : "Message Nebula..."}
           className="max-h-32 min-h-[2.5rem] flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-3.5 py-2.5 text-sm text-nebula-text placeholder:text-nebula-text-secondary/50 outline-none transition-colors focus:border-nebula-purple/60 focus:ring-2 focus:ring-nebula-purple/30 disabled:opacity-50"
         />

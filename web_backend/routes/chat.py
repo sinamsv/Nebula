@@ -17,6 +17,14 @@ never offered on web, same as Telegram), and a real chat_id -- this is
 what makes each web chat get its own independent 200k-token cap (see
 core/memory.py's docstring) rather than sharing the account-wide
 Discord/Telegram cap.
+
+--- Search mode addition (confirmed with Sina) ---
+
+The "search" tool toggle went from a bool to a 3-state mode
+("on" | "off" | "smart", see web_backend/schemas/chat.py's
+ToolToggles docstring). This module just threads whatever string it
+receives straight through to AIHandler.handle_turn()'s new
+search_mode parameter -- all the actual behavior lives in ai/handler.py.
 """
 from typing import Optional
 
@@ -148,7 +156,7 @@ async def send_message(
     _require_owned_chat(db, chat_id, identity['nebula_user_id'])
     return await _run_turn(
         identity, chat_id, body.input, ai_handler, memory,
-        images=None, enable_search=body.tools.search,
+        images=None, search_mode=body.tools.search,
     )
 
 
@@ -197,12 +205,12 @@ async def send_message_with_image(
     # rather than storing an empty string as the user's memory entry.
     message_text = text.strip() if text and text.strip() else "[Image attached]"
 
-    # Image messages always offer search too, same default as text
-    # messages -- there's no separate tool-toggle body field on the
-    # multipart image endpoint (confirmed shape carries only text +
-    # image), so this uses the same enable_search=True default
-    # send_message() uses when body.tools is left at its default.
-    return await _run_turn(identity, chat_id, message_text, ai_handler, memory, images=[attachment], enable_search=True)
+    # Image messages default to "smart" search mode, same default as
+    # text messages -- there's no separate tool-toggle body field on
+    # the multipart image endpoint (confirmed shape carries only text +
+    # image), so this uses the same default ToolToggles().search would
+    # produce.
+    return await _run_turn(identity, chat_id, message_text, ai_handler, memory, images=[attachment], search_mode="smart")
 
 
 async def _run_turn(
@@ -212,7 +220,7 @@ async def _run_turn(
     ai_handler: AIHandler,
     memory: MemoryManager,
     images: Optional[list],
-    enable_search: bool = True,
+    search_mode: str = "smart",
 ) -> SendMessageResponse:
     result = await ai_handler.handle_turn(
         source_platform=WEB_PLATFORM,
@@ -222,7 +230,7 @@ async def _run_turn(
         discord_guild=None,  # web never offers moderation tools, same as Telegram
         chat_id=chat_id,
         images=images,
-        enable_search=enable_search,
+        search_mode=search_mode,
     )
 
     if result.is_blocked:

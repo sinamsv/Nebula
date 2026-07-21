@@ -9,6 +9,7 @@ import MessageInput from "@/components/MessageInput";
 import Banner from "@/components/Banner";
 import { LoadingSpinner } from "@/components/ProtectedRoute";
 import { useAuth } from "@/lib/AuthContext";
+import { useCoins } from "@/lib/CoinsContext";
 import {
   getChats,
   createChat,
@@ -19,10 +20,15 @@ import {
   sendImageMessage,
   ApiError,
 } from "@/lib/api";
-import type { ChatMessage, ChatSummary } from "@/types/api";
+import type { ChatMessage, ChatSummary, SearchMode } from "@/types/api";
 
 export default function PlaygroundPage() {
   const { token, user } = useAuth();
+  // refreshCoins() lives in the shared CoinsContext (see
+  // lib/CoinsContext.tsx) -- calling it here after a successful send
+  // is what makes the coin badge in DashboardLayout's header update
+  // immediately instead of only on a full page reload.
+  const { refreshCoins } = useCoins();
 
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [activeChatId, setActiveChatId] = useState<number | null>(null);
@@ -164,7 +170,7 @@ export default function PlaygroundPage() {
     }
   }
 
-  async function handleSendText(text: string, searchEnabled: boolean) {
+  async function handleSendText(text: string, searchMode: SearchMode) {
     if (!token) return;
     setError(null);
     const chatId = await ensureActiveChat();
@@ -182,7 +188,7 @@ export default function PlaygroundPage() {
     setIsSending(true);
 
     try {
-      const res = await sendMessage(token, chatId, text, { search: searchEnabled });
+      const res = await sendMessage(token, chatId, text, { search: searchMode });
       if (res.reply_text) {
         setMessages((prev) => [
           ...prev,
@@ -197,6 +203,11 @@ export default function PlaygroundPage() {
       setSystemLines(res.tool_messages ?? []);
       setMemoryWarning(res.memory_warning ?? null);
       touchChatOrdering(chatId);
+      // A message always costs a coin (and search mode "on"/"smart"
+      // can additionally cost a search coin if the model actually
+      // searched) -- refresh the shared balance now so the header
+      // badge reflects it immediately instead of on next page load.
+      refreshCoins(token);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong sending that message.");
     } finally {
@@ -237,6 +248,7 @@ export default function PlaygroundPage() {
       setSystemLines(res.tool_messages ?? []);
       setMemoryWarning(res.memory_warning ?? null);
       touchChatOrdering(chatId);
+      refreshCoins(token);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong sending that image.");
     } finally {
@@ -333,6 +345,7 @@ export default function PlaygroundPage() {
               {systemLines.map((line, i) => (
                 <p
                   key={i}
+                  dir="auto"
                   className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-nebula-text-secondary"
                 >
                   {line}

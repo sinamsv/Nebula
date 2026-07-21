@@ -19,7 +19,8 @@ import {
 } from "lucide-react";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { useAuth } from "@/lib/AuthContext";
-import { getHealth, getMyCoins, ApiError } from "@/lib/api";
+import { useCoins } from "@/lib/CoinsContext";
+import { getHealth, ApiError } from "@/lib/api";
 import type { CoinStatusResponse } from "@/types/api";
 import { formatDuration, cn } from "@/lib/utils";
 
@@ -50,11 +51,16 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
 function DashboardShell({ children }: { children: ReactNode }) {
   const { user, token, logout } = useAuth();
+  // coins + refreshCoins now come from the shared CoinsContext (see
+  // lib/CoinsContext.tsx) instead of local state -- this is what lets
+  // PlaygroundPage trigger a refresh after sending a message and have
+  // THIS badge pick up the new balance immediately, without a page
+  // reload.
+  const { coins, refreshCoins } = useCoins();
   const router = useRouter();
   const pathname = usePathname();
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const [coins, setCoins] = useState<CoinStatusResponse | null>(null);
   const [aiConfigured, setAiConfigured] = useState(true);
   const [healthChecked, setHealthChecked] = useState(false);
 
@@ -67,19 +73,9 @@ function DashboardShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!token) return;
-    refreshCoins();
+    refreshCoins(token);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
-
-  async function refreshCoins() {
-    if (!token) return;
-    try {
-      const status = await getMyCoins(token);
-      setCoins(status);
-    } catch {
-      // Non-critical -- header simply omits the balance if this fails.
-    }
-  }
 
   function handleLogout() {
     logout();
@@ -232,7 +228,7 @@ function CoinBadge({ coins }: { coins: CoinStatusResponse | null }) {
   }
   return (
     <div
-      className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs"
+      className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs animate-fade-in"
       title={`Resets in ${formatDuration(coins.seconds_until_reset)}`}
     >
       <Coins className="h-3.5 w-3.5 text-nebula-pink" />

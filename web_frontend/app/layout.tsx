@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
 import { AuthProvider } from "@/lib/AuthContext";
+import { CoinsProvider } from "@/lib/CoinsContext";
 import NebulaBackground from "@/components/NebulaBackground";
 
 export const metadata: Metadata = {
@@ -15,7 +16,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en" className="dark">
       <body className="min-h-screen antialiased">
         <NebulaBackground />
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <CoinsProvider>{children}</CoinsProvider>
+        </AuthProvider>
       </body>
     </html>
   );

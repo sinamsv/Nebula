@@ -48,6 +48,37 @@ handle_turn() gains two new optional parameters:
   "[User attached N image(s)]" text note (unchanged, out of scope for
   this pass -- see discord_bot/message_listener.py's existing known
   gap note).
+
+--- Search mode addition (confirmed with Sina) ---
+
+enable_search: bool has been replaced with search_mode: str, one of
+"off" | "smart" | "on" (default "smart"):
+  - "off": the search tool is never offered to the model this turn --
+    identical to the old enable_search=False.
+  - "smart": the search tool IS offered, and the model decides for
+    itself when to use it, per system.txt's existing guidance (e.g.
+    recognizing when its own knowledge is likely stale and asking the
+    user, or searching directly for an explicit request) -- this is
+    identical in behavior to the old enable_search=True; "smart" is
+    just giving that existing default a name now that a third option
+    exists.
+  - "on": the search tool is offered, AND handle_turn() appends one
+    extra paragraph to the system prompt for this turn only (never
+    persisted, never written back to system.txt) telling the model
+    the user has explicitly turned search mode on: if the message
+    plausibly benefits from current information, it should actually
+    search rather than just asking; if the message has nothing to do
+    with search at all (e.g. small talk), the model should say so and
+    suggest the user switch back to "smart" or "off" instead of
+    forcing an irrelevant search. This is a prompt-level nudge, not a
+    forced tool_choice -- see _SEARCH_ON_INSTRUCTION below for the
+    exact wording. Forcing tool_choice was deliberately avoided since
+    it would make the model call search even for "hi", which is not
+    what "on" is supposed to mean.
+
+Discord/Telegram never pass search_mode, so they keep defaulting to
+"smart" -- byte-for-byte the same tool availability and prompt as
+before this change (no new instruction is injected in "smart" mode).
 """
 import json
 import os
@@ -71,6 +102,37 @@ KNOWN_PROVIDERS = ("openai", "anthropic", "google", "xai", "openrouter", "groq")
 # SDK of their own -- see ai/providers/openai_sdk.py's module docstring
 # for why these three share one file with "openai" itself).
 _OPENAI_COMPATIBLE_PROVIDERS = ("openai", "xai", "openrouter", "groq")
+
+# Valid values for handle_turn()'s / get_available_tools()'s
+# search_mode parameter (see module docstring's "Search mode addition"
+# section for what each one means).
+VALID_SEARCH_MODES = ("off", "smart", "on")
+
+# Appended to the system prompt ONLY for this one turn, ONLY when
+# search_mode == "on" -- never persisted to system.txt, never present
+# in "smart" or "off" mode. Deliberately a nudge/instruction, not a
+# forced tool_choice: forcing the model to always call search would
+# make search=on trigger a pointless search on something like "hi",
+# which isn't the intent (confirmed with Sina) -- the model should
+# still exercise judgment about whether THIS message needs search, it
+# should just be biased toward actually doing it (and toward saying so
+# explicitly when it doesn't) rather than silently ignoring the user's
+# explicit request to have search available.
+_SEARCH_ON_INSTRUCTION = (
+    "\n\n## Search Mode: ON\n"
+    "The user has explicitly turned search mode ON for this conversation "
+    "(as opposed to the default 'smart' mode, where you decide for "
+    "yourself when a search is warranted). For this message specifically: "
+    "if it plausibly needs current information, or your own knowledge "
+    "might be stale or incomplete for it, actually perform the search "
+    "rather than just asking the user whether you should. If the message "
+    "has nothing to do with needing outside information (e.g. small talk, "
+    "a request you can answer directly, a follow-up that doesn't need new "
+    "data), do not search just because the toggle is on -- instead, answer "
+    "normally and briefly mention that search mode is on but this message "
+    "didn't need it, and that the user can switch to 'smart' (you decide "
+    "when to search) or 'off' (never search) if they'd prefer."
+)
 
 
 class TurnResult:
@@ -307,24 +369,25 @@ class AIHandler:
     # ------------------------------------------------------------------
 
     def get_available_tools(self, is_admin: bool, supports_guild_moderation: bool,
-                             enable_search: bool = True) -> List[Dict]:
+                             search_mode: str = "smart") -> List[Dict]:
         """Unchanged from the pre-refactor version for Discord/Telegram
-        -- still produces OpenAI function-calling format, and
-        enable_search defaults to True so neither existing adapter (which
-        never passes this new parameter) sees any behavior change.
+        in every practical sense -- Discord/Telegram never pass
+        search_mode, so they always get the "smart" default, which
+        offers the search tool exactly like the old enable_search=True
+        always did.
 
-        enable_search=False is new, web-only: the confirmed /ai/generate
-        body shape (now living at POST /chat/{id}/messages, see
-        web_backend/routes/chat.py) lets a user toggle per-message
-        whether Nebula is allowed to search, e.g. {"tools": {"search":
-        false}}. Discord/Telegram have no equivalent per-message toggle
-        -- search is simply always offered there, same as before this
-        parameter existed. Each provider's call() is responsible for
-        translating this into its own SDK's tool schema (see
-        ai/providers/anthropic_sdk.py's _to_anthropic_tool and
-        ai/providers/google_sdk.py's _to_genai_tools)."""
+        search_mode replaces the old enable_search: bool (confirmed
+        with Sina): "off" omits the tool entirely (old
+        enable_search=False), "smart"/"on" both offer it (old
+        enable_search=True) -- the difference between "smart" and "on"
+        is NOT in which tools are offered, it's in an extra prompt
+        instruction handle_turn() injects for "on" only (see this
+        module's docstring and _SEARCH_ON_INSTRUCTION). This method
+        only cares about tool availability, so "smart" and "on" are
+        handled identically here.
+        """
         tools = []
-        if enable_search:
+        if search_mode != "off":
             tools.append({
                 "type": "function",
                 "function": {
@@ -418,9 +481,17 @@ class AIHandler:
         discord_guild=None,
         chat_id: Optional[int] = None,
         images: Optional[List[ImageAttachment]] = None,
-        enable_search: bool = True,
+        search_mode: str = "smart",
     ) -> TurnResult:
         result = TurnResult()
+
+        if search_mode not in VALID_SEARCH_MODES:
+            # Defensive fallback rather than raising: a malformed value
+            # here would otherwise be an opaque 500 for the caller.
+            # web_backend's own Pydantic schema already rejects invalid
+            # values at the HTTP boundary (see ToolToggles), so this
+            # path is mainly a safety net for any other caller.
+            search_mode = "smart"
 
         try:
             identity = self.auth.require_approved_identity(source_platform, platform_user_id)
@@ -467,6 +538,15 @@ class AIHandler:
             nebula_user_id, "user", message_text, source_platform, chat_id=chat_id
         )
 
+        # search_mode == "on" gets one extra paragraph appended to the
+        # system prompt for THIS turn only -- never written back to
+        # self.system_prompt, never persisted, never seen in "smart" or
+        # "off" mode. See _SEARCH_ON_INSTRUCTION's docstring for why
+        # this is a nudge rather than a forced tool_choice.
+        turn_system_prompt = self.system_prompt
+        if search_mode == "on":
+            turn_system_prompt = self.system_prompt + _SEARCH_ON_INSTRUCTION
+
         # Bounded, provider-agnostic tool-calling loop. Shape unchanged
         # from the pre-refactor version (see MAX_TOOL_ROUNDS docstring
         # above and the bug this loop originally fixed), except that
@@ -487,11 +567,11 @@ class AIHandler:
         # below to keep that guarantee obvious at the call site rather
         # than relying on each provider's internal indexing.
         final_content = None
-        tools = self.get_available_tools(is_admin, supports_guild_moderation, enable_search=enable_search)
+        tools = self.get_available_tools(is_admin, supports_guild_moderation, search_mode=search_mode)
         for round_index in range(self.MAX_TOOL_ROUNDS):
             try:
                 response = await self.provider.call(
-                    messages, tools, self.system_prompt,
+                    messages, tools, turn_system_prompt,
                     images=images if round_index == 0 else None,
                 )
             except Exception as e:
