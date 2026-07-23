@@ -1,45 +1,17 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import {
-  Bot,
-  Menu,
-  X,
-  Sparkles,
-  Radio,
-  BookOpen,
-  FolderKanban,
-  Wrench,
-  KeyRound,
-  ShieldCheck,
-  LogOut,
-  Coins,
-} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Menu, ShieldCheck, Coins } from "lucide-react";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import DashboardSidebar from "@/components/DashboardSidebar";
 import { useAuth } from "@/lib/AuthContext";
 import { useCoins } from "@/lib/CoinsContext";
-import { getHealth, ApiError } from "@/lib/api";
+import { getHealth } from "@/lib/api";
+import { formatDuration } from "@/lib/utils";
 import type { CoinStatusResponse } from "@/types/api";
-import { formatDuration, cn } from "@/lib/utils";
 
-interface NavItem {
-  href: string;
-  label: string;
-  icon: ReactNode;
-  comingSoon?: boolean;
-  adminOnly?: boolean;
-}
-
-const NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard/playground", label: "Playground", icon: <Sparkles className="h-4 w-4" /> },
-  { href: "/dashboard/platforms", label: "Platforms", icon: <Radio className="h-4 w-4" /> },
-  { href: "/dashboard/docs", label: "Docs", icon: <BookOpen className="h-4 w-4" /> },
-  { href: "/dashboard/projects", label: "Projects", icon: <FolderKanban className="h-4 w-4" />, comingSoon: true },
-  { href: "/dashboard/tools", label: "Tools", icon: <Wrench className="h-4 w-4" />, comingSoon: true },
-  { href: "/dashboard/api-key", label: "API key", icon: <KeyRound className="h-4 w-4" />, comingSoon: true },
-];
+const SIDEBAR_COLLAPSED_KEY = "nebula_sidebar_collapsed";
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
@@ -51,23 +23,43 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
 function DashboardShell({ children }: { children: ReactNode }) {
   const { user, token, logout } = useAuth();
-  // coins + refreshCoins now come from the shared CoinsContext (see
-  // lib/CoinsContext.tsx) instead of local state -- this is what lets
-  // PlaygroundPage trigger a refresh after sending a message and have
-  // THIS badge pick up the new balance immediately, without a page
-  // reload.
   const { coins, refreshCoins } = useCoins();
   const router = useRouter();
-  const pathname = usePathname();
 
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // Defaults to expanded; the actual saved preference is read after
+  // mount (see effect below) since localStorage doesn't exist during
+  // server-side rendering -- reading it any earlier would either
+  // crash on the server or cause a hydration mismatch.
+  const [collapsed, setCollapsed] = useState(false);
   const [aiConfigured, setAiConfigured] = useState(true);
   const [healthChecked, setHealthChecked] = useState(false);
 
   useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+      if (saved === "1") setCollapsed(true);
+    } catch {
+      // Storage unavailable -- fall back to the expanded default.
+    }
+  }, []);
+
+  function toggleCollapsed() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        // no-op -- preference just won't persist across reloads
+      }
+      return next;
+    });
+  }
+
+  useEffect(() => {
     getHealth()
       .then((res) => setAiConfigured(res.ai_configured))
-      .catch(() => setAiConfigured(true)) // fail open -- don't block UI on a health-check hiccup
+      .catch(() => setAiConfigured(true))
       .finally(() => setHealthChecked(true));
   }, []);
 
@@ -83,136 +75,55 @@ function DashboardShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="relative min-h-screen">
-      {/* Top bar */}
-      <header className="sticky top-0 z-30 border-b border-white/5 bg-nebula-bg/70 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setMenuOpen(true)}
-              className="flex h-9 w-9 items-center justify-center rounded-lg text-nebula-text-secondary transition-colors hover:bg-white/5 hover:text-nebula-text"
-              aria-label="Open menu"
-            >
-              <Menu className="h-5 w-5" />
-            </button>
-            <Link href="/dashboard/playground" className="flex items-center gap-2">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-nebula-purple to-nebula-pink">
-                <Bot className="h-4 w-4 text-white" />
-              </div>
-              <span className="hidden font-display text-sm font-semibold sm:inline">Nebula</span>
-            </Link>
-          </div>
+    <div className="flex h-screen overflow-hidden">
+      <DashboardSidebar
+        collapsed={collapsed}
+        onToggleCollapsed={toggleCollapsed}
+        mobileOpen={mobileMenuOpen}
+        onCloseMobile={() => setMobileMenuOpen(false)}
+        isAdmin={!!user?.is_admin}
+        username={user?.username ?? null}
+        onLogout={handleLogout}
+      />
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Slim top bar -- just the mobile menu trigger, admin badge, and coin balance.
+            No page title here on purpose: each page owns its own heading, same as
+            Claude's chat title living inside the conversation column, not a global bar. */}
+        <header className="flex flex-shrink-0 items-center justify-between border-b border-white/5 px-4 py-2.5 sm:px-6">
+          <button
+            onClick={() => setMobileMenuOpen(true)}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-nebula-text-secondary transition-colors hover:bg-white/5 hover:text-nebula-text md:hidden"
+            aria-label="Open menu"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          <span className="hidden md:block" />
 
           <div className="flex items-center gap-3">
             <CoinBadge coins={coins} />
-            <div className="hidden items-center gap-2 sm:flex">
-              <span className="text-sm text-nebula-text-secondary">{user?.username ?? "..."}</span>
-              {user?.is_admin ? (
-                <span className="flex items-center gap-1 rounded-full bg-nebula-purple/15 px-2 py-0.5 text-[11px] font-medium text-nebula-purple">
-                  <ShieldCheck className="h-3 w-3" /> Admin
-                </span>
-              ) : null}
-            </div>
-            <button
-              onClick={handleLogout}
-              className="flex h-9 w-9 items-center justify-center rounded-lg text-nebula-text-secondary transition-colors hover:bg-white/5 hover:text-red-300"
-              aria-label="Log out"
-              title="Log out"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
+            {user?.is_admin ? (
+              <span className="hidden items-center gap-1 rounded-full bg-nebula-purple/15 px-2 py-0.5 text-[11px] font-medium text-nebula-purple sm:flex">
+                <ShieldCheck className="h-3 w-3" /> Admin
+              </span>
+            ) : null}
           </div>
-        </div>
+        </header>
 
         {healthChecked && !aiConfigured ? (
-          <div className="border-t border-amber-500/20 bg-amber-500/10 px-4 py-2 text-center text-xs text-amber-200 sm:px-6">
+          <div className="flex-shrink-0 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-center text-xs text-amber-200 sm:px-6">
             Nebula&apos;s AI isn&apos;t configured yet — contact an admin.
           </div>
         ) : null}
 
         {user && !user.is_approved ? (
-          <div className="border-t border-nebula-blue/20 bg-nebula-blue/10 px-4 py-2 text-center text-xs text-nebula-blue sm:px-6">
+          <div className="flex-shrink-0 border-b border-nebula-blue/20 bg-nebula-blue/10 px-4 py-2 text-center text-xs text-nebula-blue sm:px-6">
             Your account is pending admin approval. You&apos;ll be able to chat with Nebula once approved.
           </div>
         ) : null}
-      </header>
 
-      {/* Slide-out nav */}
-      {menuOpen ? (
-        <div className="fixed inset-0 z-40 flex">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setMenuOpen(false)} />
-          <nav className="relative flex h-full w-72 flex-col gap-1 border-r border-white/10 bg-nebula-bg-secondary/95 p-4 backdrop-blur-xl animate-fade-in">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="font-display text-sm font-semibold text-nebula-text-secondary">Menu</span>
-              <button
-                onClick={() => setMenuOpen(false)}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-nebula-text-secondary hover:bg-white/5 hover:text-nebula-text"
-                aria-label="Close menu"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            {NAV_ITEMS.map((item) => {
-              const isActive = pathname?.startsWith(item.href);
-              if (item.comingSoon) {
-                return (
-                  <div
-                    key={item.href}
-                    className="flex cursor-not-allowed items-center justify-between rounded-xl px-3 py-2.5 text-sm text-nebula-text-secondary/40"
-                  >
-                    <span className="flex items-center gap-2.5">
-                      {item.icon}
-                      {item.label}
-                    </span>
-                    <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px]">soon</span>
-                  </div>
-                );
-              }
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setMenuOpen(false)}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-colors",
-                    isActive
-                      ? "bg-nebula-purple/15 text-nebula-purple"
-                      : "text-nebula-text-secondary hover:bg-white/5 hover:text-nebula-text"
-                  )}
-                >
-                  {item.icon}
-                  {item.label}
-                </Link>
-              );
-            })}
-
-            {user?.is_admin ? (
-              <>
-                <div className="my-2 h-px bg-white/10" />
-                <span className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-nebula-text-secondary/60">
-                  Admin
-                </span>
-                <Link
-                  href="/dashboard/admin"
-                  onClick={() => setMenuOpen(false)}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-colors",
-                    pathname?.startsWith("/dashboard/admin")
-                      ? "bg-nebula-purple/15 text-nebula-purple"
-                      : "text-nebula-text-secondary hover:bg-white/5 hover:text-nebula-text"
-                  )}
-                >
-                  <ShieldCheck className="h-4 w-4" />
-                  Admin panel
-                </Link>
-              </>
-            ) : null}
-          </nav>
-        </div>
-      ) : null}
-
-      <div className="mx-auto max-w-7xl">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+      </div>
     </div>
   );
 }
