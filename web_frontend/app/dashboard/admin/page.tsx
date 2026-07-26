@@ -103,7 +103,7 @@ function PendingUsersSection({ token }: { token: string }) {
           {pending.map((p) => (
             <div
               key={p.nebula_user_id}
-              className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3"
+              className="flex items-center justify-between gap-3 rounded-xl border border-nebula-border bg-white/[0.03] px-4 py-3"
             >
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{p.display_name}</p>
@@ -208,7 +208,7 @@ function AddCoinsSection({ token }: { token: string }) {
             <select
               value={mode}
               onChange={(e) => setMode(e.target.value as "add" | "set")}
-              className="rounded-xl border border-white/10 bg-white/5 px-3.5 py-2.5 text-sm text-nebula-text outline-none focus:border-nebula-purple/60 focus:ring-2 focus:ring-nebula-purple/30"
+              className="rounded-xl border border-nebula-border bg-white/[0.03] px-3.5 py-2.5 text-sm text-nebula-text outline-none focus:border-nebula-purple/60 focus:ring-2 focus:ring-nebula-purple/20"
             >
               <option value="add">Add</option>
               <option value="set">Set</option>

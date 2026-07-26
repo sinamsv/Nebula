@@ -17,9 +17,9 @@ export default function NebulaBackground() {
       <div className="absolute inset-0 bg-nebula-glow" />
 
       {/* Drifting blobs -- soft, blurred, slow */}
-      <div className="absolute -top-32 -left-20 h-[36rem] w-[36rem] rounded-full bg-nebula-purple/20 blur-[110px] animate-drift-slow" />
-      <div className="absolute top-1/3 -right-32 h-[30rem] w-[30rem] rounded-full bg-nebula-blue/15 blur-[100px] animate-drift-slower" />
-      <div className="absolute bottom-[-10rem] left-1/4 h-[28rem] w-[28rem] rounded-full bg-nebula-pink/15 blur-[100px] animate-drift-slow" />
+      <div className="absolute -top-32 -left-20 h-[36rem] w-[36rem] rounded-full bg-nebula-purple/[0.16] blur-[120px] animate-drift-slow" />
+      <div className="absolute top-1/3 -right-32 h-[30rem] w-[30rem] rounded-full bg-nebula-blue/[0.12] blur-[110px] animate-drift-slower" />
+      <div className="absolute bottom-[-10rem] left-1/4 h-[28rem] w-[28rem] rounded-full bg-nebula-pink/[0.12] blur-[110px] animate-drift-slow" />
 
       {/* Star points */}
       <Starfield />

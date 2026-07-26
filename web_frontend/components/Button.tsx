@@ -12,9 +12,9 @@ const variantClasses: Record<NonNullable<ButtonProps["variant"]>, string> = {
   primary:
     "bg-gradient-to-r from-nebula-purple to-nebula-pink text-white shadow-glow hover:brightness-110 active:brightness-95",
   secondary:
-    "bg-white/5 text-nebula-text border border-white/10 hover:bg-white/10",
+    "bg-white/[0.04] text-nebula-text border border-nebula-border hover:bg-white/[0.08] hover:border-nebula-border-hover",
   ghost: "bg-transparent text-nebula-text-secondary hover:text-nebula-text hover:bg-white/5",
-  danger: "bg-red-500/15 text-red-300 border border-red-500/30 hover:bg-red-500/25",
+  danger: "bg-red-500/10 text-red-300 border border-red-500/25 hover:bg-red-500/20",
 };
 
 const sizeClasses: Record<NonNullable<ButtonProps["size"]>, string> = {

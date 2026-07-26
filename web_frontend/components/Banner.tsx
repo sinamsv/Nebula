@@ -9,9 +9,9 @@ interface BannerProps {
 }
 
 const variantStyles: Record<NonNullable<BannerProps["variant"]>, string> = {
-  error: "border-red-500/30 bg-red-500/10 text-red-200",
-  warning: "border-amber-500/30 bg-amber-500/10 text-amber-200",
-  info: "border-nebula-blue/30 bg-nebula-blue/10 text-nebula-blue",
+  error: "border-red-500/25 bg-red-500/[0.08] text-red-200",
+  warning: "border-amber-500/25 bg-amber-500/[0.08] text-amber-200",
+  info: "border-nebula-blue/25 bg-nebula-blue/[0.08] text-nebula-blue",
 };
 
 export default function Banner({ children, variant = "error", className }: BannerProps) {

@@ -79,7 +79,7 @@ export default function DashboardSidebar({
               key={item.href}
               title={collapsed ? `${item.label} (coming soon)` : undefined}
               className={cn(
-                "flex cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-nebula-text-secondary/40",
+                "flex cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-nebula-text-tertiary",
                 collapsed && "justify-center px-0"
               )}
             >
@@ -103,7 +103,7 @@ export default function DashboardSidebar({
               "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
               collapsed && "justify-center px-0",
               isActive
-                ? "bg-nebula-purple/15 text-nebula-purple"
+                ? "bg-nebula-purple/[0.12] text-nebula-purple"
                 : "text-nebula-text-secondary hover:bg-white/5 hover:text-nebula-text"
             )}
           >
@@ -115,7 +115,7 @@ export default function DashboardSidebar({
 
       {isAdmin ? (
         <>
-          <div className="my-2 h-px bg-white/10" />
+          <div className="my-2 h-px bg-nebula-border" />
           {!collapsed ? (
             <span className="px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-nebula-text-secondary/60">
               Admin
@@ -129,7 +129,7 @@ export default function DashboardSidebar({
               "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
               collapsed && "justify-center px-0",
               pathname?.startsWith("/dashboard/admin")
-                ? "bg-nebula-purple/15 text-nebula-purple"
+                ? "bg-nebula-purple/[0.12] text-nebula-purple"
                 : "text-nebula-text-secondary hover:bg-white/5 hover:text-nebula-text"
             )}
           >
@@ -142,14 +142,14 @@ export default function DashboardSidebar({
   );
 
   const footer = (
-    <div className={cn("flex items-center gap-2 border-t border-white/10 pt-3", collapsed && "flex-col")}>
+    <div className={cn("flex items-center gap-2 border-t border-nebula-border pt-3", collapsed && "flex-col")}>
       {!collapsed ? (
         <span className="min-w-0 flex-1 truncate text-xs text-nebula-text-secondary">{username ?? "..."}</span>
       ) : null}
       <button
         onClick={onLogout}
         title="Log out"
-        className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-nebula-text-secondary transition-colors hover:bg-white/5 hover:text-red-300"
+        className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-nebula-text-secondary transition-colors hover:bg-white/5 hover:text-red-300 cursor-pointer"
       >
         <LogOut className="h-4 w-4" />
       </button>
@@ -184,7 +184,7 @@ export default function DashboardSidebar({
           onClick={onToggleCollapsed}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           className={cn(
-            "mb-2 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs text-nebula-text-secondary transition-colors hover:bg-white/5 hover:text-nebula-text",
+            "mb-2 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs text-nebula-text-secondary transition-colors hover:bg-white/5 hover:text-nebula-text cursor-pointer",
             collapsed && "justify-center px-0"
           )}
         >
@@ -199,7 +199,7 @@ export default function DashboardSidebar({
 
       {/* Mobile: full-screen panel (not a partial drawer) */}
       {mobileOpen ? (
-        <div className="fixed inset-0 z-40 flex flex-col bg-nebula-bg p-4 md:hidden">
+        <div className="fixed inset-0 z-40 flex flex-col bg-nebula-bg p-4 md:hidden animate-fade-in">
           <div className="mb-4 flex items-center justify-between">
             <Link href="/dashboard/playground" onClick={onCloseMobile} className="flex items-center gap-2">
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-nebula-purple to-nebula-pink">
@@ -209,7 +209,7 @@ export default function DashboardSidebar({
             </Link>
             <button
               onClick={onCloseMobile}
-              className="flex h-9 w-9 items-center justify-center rounded-lg text-nebula-text-secondary hover:bg-white/5 hover:text-nebula-text"
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-nebula-text-secondary hover:bg-white/5 hover:text-nebula-text cursor-pointer"
               aria-label="Close menu"
             >
               <X className="h-5 w-5" />

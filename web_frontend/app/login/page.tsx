@@ -37,7 +37,7 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-screen items-center justify-center px-6 py-12">
-      <div className="w-full max-w-md animate-fade-in">
+      <div className="w-full max-w-md animate-fade-in-up">
         <div className="mb-6 flex items-center justify-center gap-2.5">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-nebula-purple to-nebula-pink shadow-glow">
             <Bot className="h-5 w-5 text-white" />
@@ -45,7 +45,7 @@ export default function LoginPage() {
           <span className="font-display text-lg font-semibold">Nebula</span>
         </div>
 
-        <GlassPanel className="p-7">
+        <GlassPanel className="p-7 sm:p-8">
           <h1 className="font-display text-xl font-semibold">Welcome back</h1>
           <p className="mt-1 text-sm text-nebula-text-secondary">Log in to continue to your dashboard.</p>
 

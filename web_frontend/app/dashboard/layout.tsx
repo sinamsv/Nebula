@@ -93,7 +93,7 @@ function DashboardShell({ children }: { children: ReactNode }) {
         <header className="flex flex-shrink-0 items-center justify-between border-b border-white/5 px-4 py-2.5 sm:px-6">
           <button
             onClick={() => setMobileMenuOpen(true)}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-nebula-text-secondary transition-colors hover:bg-white/5 hover:text-nebula-text md:hidden"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-nebula-text-secondary transition-colors hover:bg-white/5 hover:text-nebula-text md:hidden cursor-pointer"
             aria-label="Open menu"
           >
             <Menu className="h-5 w-5" />
@@ -111,13 +111,13 @@ function DashboardShell({ children }: { children: ReactNode }) {
         </header>
 
         {healthChecked && !aiConfigured ? (
-          <div className="flex-shrink-0 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-center text-xs text-amber-200 sm:px-6">
+          <div className="flex-shrink-0 border-b border-amber-500/20 bg-amber-500/[0.06] px-4 py-2 text-center text-xs text-amber-200 sm:px-6">
             Nebula&apos;s AI isn&apos;t configured yet — contact an admin.
           </div>
         ) : null}
 
         {user && !user.is_approved ? (
-          <div className="flex-shrink-0 border-b border-nebula-blue/20 bg-nebula-blue/10 px-4 py-2 text-center text-xs text-nebula-blue sm:px-6">
+          <div className="flex-shrink-0 border-b border-nebula-blue/20 bg-nebula-blue/[0.06] px-4 py-2 text-center text-xs text-nebula-blue sm:px-6">
             Your account is pending admin approval. You&apos;ll be able to chat with Nebula once approved.
           </div>
         ) : null}
@@ -131,7 +131,7 @@ function DashboardShell({ children }: { children: ReactNode }) {
 function CoinBadge({ coins }: { coins: CoinStatusResponse | null }) {
   if (!coins) {
     return (
-      <div className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-nebula-text-secondary">
+      <div className="flex items-center gap-1.5 rounded-full border border-nebula-border bg-white/5 px-3 py-1.5 text-xs text-nebula-text-secondary">
         <Coins className="h-3.5 w-3.5" />
         <span>...</span>
       </div>
@@ -139,7 +139,7 @@ function CoinBadge({ coins }: { coins: CoinStatusResponse | null }) {
   }
   return (
     <div
-      className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs animate-fade-in"
+      className="flex items-center gap-1.5 rounded-full border border-nebula-border bg-white/5 px-3 py-1.5 text-xs animate-fade-in"
       title={`Resets in ${formatDuration(coins.seconds_until_reset)}`}
     >
       <Coins className="h-3.5 w-3.5 text-nebula-pink" />

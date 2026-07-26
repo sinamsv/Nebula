@@ -83,7 +83,7 @@ export default function PlatformsPage() {
                 "flex items-center gap-3 rounded-2xl border p-4 text-left transition-colors cursor-pointer disabled:cursor-not-allowed",
                 selected === p.id
                   ? "border-nebula-purple/50 bg-nebula-purple/10"
-                  : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]"
+                  : "border-nebula-border bg-white/[0.03] hover:bg-white/[0.06]"
               )}
             >
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 text-nebula-purple">
@@ -111,13 +111,13 @@ export default function PlatformsPage() {
       ) : null}
 
       {syncResult ? (
-        <GlassPanel className="mt-6 p-5" glow="blue">
+        <GlassPanel className="mt-6 p-5 animate-scale-in" glow="blue">
           <p className="text-sm text-nebula-text-secondary">
             Paste this into a message to the Nebula bot on{" "}
             <span className="font-medium text-nebula-text capitalize">{syncResult.target_platform}</span> to link
             your account:
           </p>
-          <div className="mt-3 flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 p-3">
+          <div className="mt-3 flex items-center gap-2 rounded-xl border border-nebula-border bg-black/30 p-3">
             <code className="flex-1 overflow-x-auto whitespace-nowrap font-mono text-sm text-nebula-blue">
               {syncResult.verify_command_hint}
             </code>

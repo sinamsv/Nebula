@@ -22,10 +22,11 @@ const TextField = forwardRef<HTMLInputElement, TextFieldProps>(
           ref={ref}
           id={inputId}
           className={cn(
-            "rounded-xl border bg-white/5 px-3.5 py-2.5 text-nebula-text placeholder:text-nebula-text-secondary/50",
-            "border-white/10 outline-none transition-colors duration-150",
-            "focus:border-nebula-purple/60 focus:ring-2 focus:ring-nebula-purple/30",
-            error && "border-red-400/60 focus:border-red-400/60 focus:ring-red-400/30",
+            "rounded-xl border bg-white/[0.03] px-3.5 py-2.5 text-nebula-text placeholder:text-nebula-text-tertiary",
+            "border-nebula-border outline-none transition-colors duration-150",
+            "focus:border-nebula-purple/60 focus:ring-2 focus:ring-nebula-purple/20",
+            "hover:border-nebula-border-hover",
+            error && "border-red-400/50 focus:border-red-400/60 focus:ring-red-400/20",
             className
           )}
           {...rest}

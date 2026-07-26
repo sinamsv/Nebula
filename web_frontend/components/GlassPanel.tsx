@@ -15,12 +15,12 @@ export default function GlassPanel({
   ...rest
 }: GlassPanelProps) {
   const glowClass =
-    glow === "purple" ? "shadow-glow" : glow === "pink" ? "shadow-glow-pink" : glow === "blue" ? "shadow-glow-blue" : "";
+    glow === "purple" ? "shadow-glow" : glow === "pink" ? "shadow-glow-pink" : glow === "blue" ? "shadow-glow-blue" : "shadow-glow-soft";
 
   return (
     <div
       className={cn(
-        "rounded-2xl border border-white/10 bg-nebula-bg-secondary/60 backdrop-blur-xl",
+        "rounded-2xl border border-nebula-border bg-nebula-surface/70 backdrop-blur-xl",
         glowClass,
         className
       )}

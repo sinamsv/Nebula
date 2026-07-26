@@ -32,23 +32,23 @@ export default function LandingPage() {
       </header>
 
       <section className="flex flex-1 flex-col items-start justify-center gap-6 py-20">
-        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-nebula-text-secondary">
+        <span className="animate-fade-in-up rounded-full border border-nebula-border bg-white/[0.03] px-3 py-1 text-xs font-medium text-nebula-text-secondary">
           Open source · Discord · Telegram · Web
         </span>
-        <h1 className="max-w-2xl font-display text-4xl font-bold leading-[1.1] tracking-tight sm:text-6xl">
+        <h1 className="max-w-2xl animate-fade-in-up font-display text-4xl font-bold leading-[1.1] tracking-tight sm:text-6xl">
           Your AI,{" "}
           <span className="bg-gradient-to-r from-nebula-pink via-nebula-purple to-nebula-blue bg-clip-text text-transparent">
             everywhere
           </span>{" "}
           you already are.
         </h1>
-        <p className="max-w-xl text-base text-nebula-text-secondary sm:text-lg">
+        <p className="max-w-xl animate-fade-in-up text-base leading-relaxed text-nebula-text-secondary sm:text-lg">
           Nebula is an open-source AI assistant that follows you across platforms.
           One account, one memory, one coin balance — whether you talk to it on
           Discord, Telegram, or right here on the web.
         </p>
 
-        <div className="flex flex-wrap items-center gap-3 pt-2">
+        <div className="flex animate-fade-in-up flex-wrap items-center gap-3 pt-2">
           <Link href="/signup">
             <Button size="lg">
               Sign Up <ArrowRight className="h-4 w-4" />
@@ -108,10 +108,10 @@ function PlatformCard({
   description: string;
 }) {
   return (
-    <GlassPanel className="flex flex-col gap-3 p-5" glow="none">
+    <GlassPanel className="flex flex-col gap-3 p-5 transition-colors hover:bg-white/[0.03]" glow="none">
       <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/5">{icon}</div>
       <h3 className="font-display text-sm font-semibold">{title}</h3>
-      <p className="text-sm text-nebula-text-secondary">{description}</p>
+      <p className="text-sm leading-relaxed text-nebula-text-secondary">{description}</p>
     </GlassPanel>
   );
 }

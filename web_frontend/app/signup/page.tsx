@@ -62,7 +62,7 @@ export default function SignupPage() {
 
   return (
     <main className="flex min-h-screen items-center justify-center px-6 py-12">
-      <div className="w-full max-w-md animate-fade-in">
+      <div className="w-full max-w-md animate-fade-in-up">
         <div className="mb-6 flex items-center justify-center gap-2.5">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-nebula-purple to-nebula-pink shadow-glow">
             <Bot className="h-5 w-5 text-white" />
@@ -70,7 +70,7 @@ export default function SignupPage() {
           <span className="font-display text-lg font-semibold">Nebula</span>
         </div>
 
-        <GlassPanel className="p-7">
+        <GlassPanel className="p-7 sm:p-8">
           <h1 className="font-display text-xl font-semibold">Create your account</h1>
           <p className="mt-1 text-sm text-nebula-text-secondary">
             One account works across Discord, Telegram, and the web.
@@ -109,7 +109,7 @@ export default function SignupPage() {
             />
 
             {!checkingBootstrap && bootstrapAvailable ? (
-              <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
+              <div className="rounded-xl border border-nebula-border bg-white/[0.03] p-3.5">
                 <label className="flex cursor-pointer items-center gap-2.5 text-sm">
                   <input
                     type="checkbox"

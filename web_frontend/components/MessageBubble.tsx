@@ -3,12 +3,13 @@ import remarkGfm from "remark-gfm";
 import { Bot, User } from "lucide-react";
 import { cn, formatTimestamp } from "@/lib/utils";
 import type { ChatMessage } from "@/types/api";
+import CodeBlock from "@/components/CodeBlock";
 
 export default function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
 
   return (
-    <div className={cn("flex gap-3 animate-fade-in", isUser ? "flex-row-reverse" : "flex-row")}>
+    <div className={cn("flex gap-3 animate-fade-in-up", isUser ? "flex-row-reverse" : "flex-row")}>
       <div
         className={cn(
           "flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg",
@@ -24,7 +25,8 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
             "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
             isUser
               ? "bg-gradient-to-br from-nebula-purple/25 to-nebula-pink/20 text-nebula-text"
-              : "border border-white/10 bg-white/[0.04] text-nebula-text"
+              : "border border-nebula-border bg-white/[0.03] text-nebula-text",
+            !isUser && "w-full"
           )}
         >
           {isUser ? (
@@ -33,7 +35,32 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
             </p>
           ) : (
             <div dir="auto" className="markdown-body">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  code(props) {
+                    const { className, children, ...rest } = props;
+                    // react-markdown gives fenced code blocks a
+                    // `language-xxx` className (from remark/rehype's
+                    // standard convention) and renders them inside a
+                    // <pre>; inline code has no className and no <pre>
+                    // wrapper. That's the reliable signal to tell them
+                    // apart -- checking for a newline in the content is
+                    // NOT reliable (a fenced block can be one line).
+                    const match = /language-(\w+)/.exec(className || "");
+                    if (match) {
+                      return <CodeBlock language={match[1]} code={String(children)} />;
+                    }
+                    return (
+                      <code className={className} {...rest}>
+                        {children}
+                      </code>
+                    );
+                  },
+                }}
+              >
+                {message.content}
+              </ReactMarkdown>
             </div>
           )}
         </div>

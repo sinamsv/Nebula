@@ -8,6 +8,7 @@ import Banner from "@/components/Banner";
 import { LoadingSpinner } from "@/components/ProtectedRoute";
 import { useAuth } from "@/lib/AuthContext";
 import { useCoins } from "@/lib/CoinsContext";
+import { getGreeting, getGreetingSubtitle } from "@/lib/utils";
 import {
   getChats,
   createChat,
@@ -30,6 +31,15 @@ import ChatHistoryPopover from "@/components/ChatHistoryPopover";
  * triggered from this page's own header (see ChatHistoryPopover),
  * the same way Claude keeps "your chats" one level down from the
  * global nav rather than as a second permanent column.
+ *
+ * Layout redesign: when there's no active chat OR the active chat has
+ * no messages yet, the composer is vertically centered with a greeting
+ * above it (the "hero" empty state, ChatGPT/Claude-style). The moment
+ * a message is sent (or an existing chat with history loads), the
+ * composer animates down to its docked position at the bottom of the
+ * screen and the transcript takes over the remaining space. This is a
+ * pure layout/CSS transition -- no change to how chats are created,
+ * fetched, or sent.
  */
 export default function PlaygroundPage() {
   const { token, user } = useAuth();
@@ -46,6 +56,11 @@ export default function PlaygroundPage() {
   const [isCreatingChat, setIsCreatingChat] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Greeting text is picked once per mount (not on every render) so it
+  // doesn't change while the person is looking at the empty state.
+  const [greeting] = useState(() => getGreeting(user?.username ?? null));
+  const [subtitle] = useState(() => getGreetingSubtitle());
 
   const scrollAnchorRef = useRef<HTMLDivElement>(null);
 
@@ -257,104 +272,118 @@ export default function PlaygroundPage() {
 
   const inputDisabled = isSending || !user?.is_approved;
   const activeChat = chats.find((c) => c.chat_id === activeChatId) ?? null;
+  const isLoading = isLoadingChats || isLoadingHistory;
+  // "Empty state" = nothing to scroll through yet, so the composer
+  // gets the centered hero treatment instead of docking at the bottom.
+  const isEmptyState = !isLoading && messages.length === 0;
 
   return (
     <div className="flex h-full flex-col">
       {/* Page-local header: chat title + the chat-switcher popover.
           This is the "one level down from global nav" pattern -- see
-          the file-level note above. */}
-      <div className="flex flex-shrink-0 items-center justify-between border-b border-white/5 px-4 py-2.5 sm:px-6">
-        <ChatHistoryPopover
-          chats={chats}
-          activeChat={activeChat}
-          isLoading={isLoadingChats}
-          isCreating={isCreatingChat}
-          onSelectChat={setActiveChatId}
-          onCreateChat={handleCreateChat}
-          onRenameChat={handleRenameChat}
-          onDeleteChat={handleDeleteChat}
-        />
-      </div>
+          the file-level note above. Hidden in the pure empty state
+          (no chat selected yet) to keep that screen uncluttered,
+          matching ChatGPT/Claude's blank-slate look. */}
+      {activeChatId !== null || chats.length > 0 ? (
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-white/5 px-4 py-2.5 sm:px-6">
+          <ChatHistoryPopover
+            chats={chats}
+            activeChat={activeChat}
+            isLoading={isLoadingChats}
+            isCreating={isCreatingChat}
+            onSelectChat={setActiveChatId}
+            onCreateChat={handleCreateChat}
+            onRenameChat={handleRenameChat}
+            onDeleteChat={handleDeleteChat}
+          />
+        </div>
+      ) : null}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
-        {isLoadingChats || isLoadingHistory ? (
-          <div className="flex h-full items-center justify-center">
-            <LoadingSpinner />
-          </div>
-        ) : activeChatId === null ? (
-          <EmptyState onCreateChat={handleCreateChat} isCreating={isCreatingChat} />
-        ) : messages.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-sm text-nebula-text-secondary">
-            Say hello to start this conversation.
-          </div>
-        ) : (
-          <div className="mx-auto flex max-w-2xl flex-col gap-6">
-            {messages.map((m, i) => (
-              <MessageBubble key={i} message={m} />
-            ))}
-            {isSending ? <TypingIndicator /> : null}
-            <div ref={scrollAnchorRef} />
-          </div>
-        )}
-      </div>
+      {isEmptyState ? (
+        // --- HERO / CENTERED STATE ------------------------------------
+        <div className="flex flex-1 flex-col items-center justify-center px-4 pb-24 sm:px-6">
+          <div className="w-full max-w-2xl animate-fade-in-up">
+            <div className="mb-8 text-center">
+              <h1 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+                <span className="text-gradient-brand">{greeting}</span>
+              </h1>
+              <p className="mt-2 text-sm text-nebula-text-secondary sm:text-base">{subtitle}</p>
+            </div>
 
-      <div className="mx-auto w-full max-w-2xl px-4 sm:px-6">
-        {error ? (
-          <div className="pb-2">
-            <Banner variant="error">{error}</Banner>
-          </div>
-        ) : null}
-        {memoryWarning ? (
-          <div className="pb-2">
-            <Banner variant="warning">{memoryWarning}</Banner>
-          </div>
-        ) : null}
-        {systemLines.length > 0 ? (
-          <div className="flex flex-col gap-1 pb-2">
-            {systemLines.map((line, i) => (
-              <p
-                key={i}
-                dir="auto"
-                className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-nebula-text-secondary"
-              >
-                {line}
-              </p>
-            ))}
-          </div>
-        ) : null}
-        {!user?.is_approved ? (
-          <div className="pb-3">
-            <Banner variant="info">
-              Your account is still pending admin approval — you&apos;ll be able to chat once approved.
-            </Banner>
-          </div>
-        ) : null}
-      </div>
+            {error ? (
+              <div className="mb-4">
+                <Banner variant="error">{error}</Banner>
+              </div>
+            ) : null}
 
-      <div className="mx-auto w-full max-w-2xl px-4 pb-4 sm:px-6">
-        <MessageInput onSendText={handleSendText} onSendImage={handleSendImage} disabled={inputDisabled} />
-      </div>
-    </div>
-  );
-}
+            <MessageInput onSendText={handleSendText} onSendImage={handleSendImage} disabled={inputDisabled} variant="hero" />
 
-function EmptyState({ onCreateChat, isCreating }: { onCreateChat: () => void; isCreating: boolean }) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-nebula-purple to-nebula-pink shadow-glow">
-        <span className="text-2xl">✨</span>
-      </div>
-      <div>
-        <h2 className="font-display text-lg font-semibold">No chat selected</h2>
-        <p className="mt-1 text-sm text-nebula-text-secondary">Start a new conversation with Nebula.</p>
-      </div>
-      <button
-        onClick={onCreateChat}
-        disabled={isCreating}
-        className="rounded-xl bg-gradient-to-r from-nebula-purple to-nebula-pink px-5 py-2.5 text-sm font-medium text-white shadow-glow transition-all hover:brightness-110 disabled:opacity-50 cursor-pointer"
-      >
-        New Chat
-      </button>
+            {!user?.is_approved ? (
+              <div className="mt-3">
+                <Banner variant="info">
+                  Your account is still pending admin approval — you&apos;ll be able to chat once approved.
+                </Banner>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        // --- ACTIVE CHAT / DOCKED STATE ---------------------------------
+        <>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+            {isLoading ? (
+              <div className="flex h-full items-center justify-center">
+                <LoadingSpinner />
+              </div>
+            ) : (
+              <div className="mx-auto flex max-w-2xl flex-col gap-6">
+                {messages.map((m, i) => (
+                  <MessageBubble key={i} message={m} />
+                ))}
+                {isSending ? <TypingIndicator /> : null}
+                <div ref={scrollAnchorRef} />
+              </div>
+            )}
+          </div>
+
+          <div className="mx-auto w-full max-w-2xl px-4 sm:px-6">
+            {error ? (
+              <div className="pb-2">
+                <Banner variant="error">{error}</Banner>
+              </div>
+            ) : null}
+            {memoryWarning ? (
+              <div className="pb-2">
+                <Banner variant="warning">{memoryWarning}</Banner>
+              </div>
+            ) : null}
+            {systemLines.length > 0 ? (
+              <div className="flex flex-col gap-1 pb-2">
+                {systemLines.map((line, i) => (
+                  <p
+                    key={i}
+                    dir="auto"
+                    className="rounded-lg border border-nebula-border bg-white/[0.03] px-3 py-1.5 text-xs text-nebula-text-secondary"
+                  >
+                    {line}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+            {!user?.is_approved ? (
+              <div className="pb-3">
+                <Banner variant="info">
+                  Your account is still pending admin approval — you&apos;ll be able to chat once approved.
+                </Banner>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="mx-auto w-full max-w-2xl px-4 pb-4 sm:px-6 animate-fade-in-up">
+            <MessageInput onSendText={handleSendText} onSendImage={handleSendImage} disabled={inputDisabled} variant="docked" />
+          </div>
+        </>
+      )}
     </div>
   );
 }

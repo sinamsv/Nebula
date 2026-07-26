@@ -43,3 +43,31 @@ export function formatRelativeTime(raw: string): string {
   if (diffDay < 7) return `${diffDay}d ago`;
   return formatTimestamp(raw);
 }
+
+/** Time-aware greeting for the Playground empty state. Purely
+ * presentational (no backend dependency) -- reads the browser's own
+ * local clock, so it's correct for whatever timezone the person is
+ * actually sitting in, same as the greeting on their OS lock screen. */
+export function getGreeting(name?: string | null): string {
+  const hour = new Date().getHours();
+  let base: string;
+  if (hour < 5) base = "Still up";
+  else if (hour < 12) base = "Good morning";
+  else if (hour < 18) base = "Good afternoon";
+  else base = "Good evening";
+  return name ? `${base}, ${name}` : base;
+}
+
+const SUBTITLES = [
+  "What would you like to start today?",
+  "What's on your mind?",
+  "Ready when you are.",
+  "What can I help you build today?",
+];
+
+/** Deterministic-per-session subtitle rotation -- picks once per page
+ * load rather than re-rolling on every render, so it doesn't flicker
+ * between keystrokes while the empty state is showing. */
+export function getGreetingSubtitle(): string {
+  return SUBTITLES[Math.floor(Math.random() * SUBTITLES.length)];
+}

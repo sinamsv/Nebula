@@ -64,21 +64,21 @@ export default function ChatHistoryPopover({
     <div ref={containerRef} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm font-medium text-nebula-text transition-colors hover:bg-white/5"
+        className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm font-medium text-nebula-text transition-colors hover:bg-white/5 cursor-pointer"
       >
         <span className="max-w-[50vw] truncate sm:max-w-xs">{activeChat?.title ?? "Playground"}</span>
         <ChevronDown className={cn("h-3.5 w-3.5 text-nebula-text-secondary transition-transform", open && "rotate-180")} />
       </button>
 
       {open ? (
-        <div className="absolute left-0 top-full z-30 mt-2 w-80 max-w-[90vw] rounded-2xl border border-white/10 bg-nebula-bg-secondary/95 p-2 shadow-glow backdrop-blur-xl animate-fade-in">
+        <div className="absolute left-0 top-full z-30 mt-2 w-80 max-w-[90vw] rounded-2xl border border-nebula-border bg-nebula-surface/95 p-2 shadow-glow-soft backdrop-blur-xl animate-scale-in">
           <button
             onClick={() => {
               onCreateChat();
               setOpen(false);
             }}
             disabled={isCreating}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm font-medium text-nebula-text transition-colors hover:bg-white/10 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-nebula-border bg-white/5 px-3 py-2.5 text-sm font-medium text-nebula-text transition-colors hover:bg-white/10 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
           >
             <Plus className="h-4 w-4" />
             New Chat
@@ -118,14 +118,14 @@ export default function ChatHistoryPopover({
                           />
                           <button
                             onClick={() => commitEdit(chat.chat_id)}
-                            className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-green-400 hover:bg-white/10"
+                            className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-green-400 hover:bg-white/10 cursor-pointer"
                             aria-label="Save name"
                           >
                             <Check className="h-3.5 w-3.5" />
                           </button>
                           <button
                             onClick={() => setEditingId(null)}
-                            className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-nebula-text-secondary hover:bg-white/10"
+                            className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-nebula-text-secondary hover:bg-white/10 cursor-pointer"
                             aria-label="Cancel"
                           >
                             <X className="h-3.5 w-3.5" />
@@ -139,13 +139,13 @@ export default function ChatHistoryPopover({
                               onDeleteChat(chat.chat_id);
                               setConfirmDeleteId(null);
                             }}
-                            className="flex-shrink-0 rounded-md bg-red-500/20 px-2 py-1 text-xs text-red-300 hover:bg-red-500/30"
+                            className="flex-shrink-0 rounded-md bg-red-500/20 px-2 py-1 text-xs text-red-300 hover:bg-red-500/30 cursor-pointer"
                           >
                             Delete
                           </button>
                           <button
                             onClick={() => setConfirmDeleteId(null)}
-                            className="flex-shrink-0 rounded-md px-2 py-1 text-xs text-nebula-text-secondary hover:bg-white/10"
+                            className="flex-shrink-0 rounded-md px-2 py-1 text-xs text-nebula-text-secondary hover:bg-white/10 cursor-pointer"
                           >
                             Cancel
                           </button>
@@ -167,14 +167,14 @@ export default function ChatHistoryPopover({
                           </span>
                           <button
                             onClick={() => startEditing(chat)}
-                            className="hidden h-6 w-6 flex-shrink-0 items-center justify-center rounded-md hover:bg-white/10 group-hover:flex"
+                            className="hidden h-6 w-6 flex-shrink-0 items-center justify-center rounded-md hover:bg-white/10 group-hover:flex cursor-pointer"
                             aria-label="Rename chat"
                           >
                             <Pencil className="h-3 w-3" />
                           </button>
                           <button
                             onClick={() => setConfirmDeleteId(chat.chat_id)}
-                            className="hidden h-6 w-6 flex-shrink-0 items-center justify-center rounded-md hover:bg-red-500/20 hover:text-red-300 group-hover:flex"
+                            className="hidden h-6 w-6 flex-shrink-0 items-center justify-center rounded-md hover:bg-red-500/20 hover:text-red-300 group-hover:flex cursor-pointer"
                             aria-label="Delete chat"
                           >
                             <Trash2 className="h-3 w-3" />
