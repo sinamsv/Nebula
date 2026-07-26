@@ -59,14 +59,15 @@ class OpenAISDKProvider(BaseProvider):
 
     async def call(self, messages: List[Dict], tools: List[Dict],
                     system_prompt: str,
-                    images: Optional[List[ImageAttachment]] = None) -> NormalizedResponse:
+                    images: Optional[List[ImageAttachment]] = None,
+                    model_override: Optional[str] = None) -> NormalizedResponse:
         full_messages = [{"role": "system", "content": system_prompt}] + list(messages)
 
         if images:
             full_messages[-1] = self._attach_images_to_message(full_messages[-1], images)
 
         kwargs: Dict[str, Any] = {
-            "model": self.model,
+            "model": model_override or self.model,
             "messages": full_messages,
             "tools": tools if tools else None,
             "tool_choice": "auto" if tools else None,

@@ -71,6 +71,7 @@ class ToolToggles(BaseModel):
 class SendMessageRequest(BaseModel):
     input: str
     tools: ToolToggles = ToolToggles()
+    model: Optional[str] = None
 
 
 class SendMessageResponse(BaseModel):

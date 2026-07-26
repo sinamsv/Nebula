@@ -97,7 +97,8 @@ class GoogleSDKProvider(BaseProvider):
 
     async def call(self, messages: List[Dict], tools: List[Dict],
                     system_prompt: str,
-                    images: Optional[List[ImageAttachment]] = None) -> NormalizedResponse:
+                    images: Optional[List[ImageAttachment]] = None,
+                    model_override: Optional[str] = None) -> NormalizedResponse:
         contents = self._to_genai_contents(messages, images=images)
         genai_tools = self._to_genai_tools(tools) if tools else None
 
@@ -114,7 +115,7 @@ class GoogleSDKProvider(BaseProvider):
             )
 
         response = await self.client.aio.models.generate_content(
-            model=self.model,
+            model=model_override or self.model,
             contents=contents,
             config=genai_types.GenerateContentConfig(**config_kwargs),
         )

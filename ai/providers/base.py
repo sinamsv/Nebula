@@ -164,6 +164,7 @@ class BaseProvider(ABC):
         tools: List[Dict],
         system_prompt: str,
         images: Optional[List[ImageAttachment]] = None,
+        model_override: Optional[str] = None,
     ) -> NormalizedResponse:
         """Make one request to this provider's API and return a
         NormalizedResponse.

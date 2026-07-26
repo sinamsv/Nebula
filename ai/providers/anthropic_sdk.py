@@ -72,7 +72,8 @@ class AnthropicSDKProvider(BaseProvider):
 
     async def call(self, messages: List[Dict], tools: List[Dict],
                     system_prompt: str,
-                    images: Optional[List[ImageAttachment]] = None) -> NormalizedResponse:
+                    images: Optional[List[ImageAttachment]] = None,
+                    model_override: Optional[str] = None) -> NormalizedResponse:
         anthropic_tools = [self._to_anthropic_tool(t) for t in tools] if tools else None
 
         call_messages = list(messages)
@@ -80,7 +81,7 @@ class AnthropicSDKProvider(BaseProvider):
             call_messages[-1] = self._attach_images_to_message(call_messages[-1], images)
 
         kwargs: Dict[str, Any] = {
-            "model": self.model,
+            "model": model_override or self.model,
             "system": system_prompt,
             "messages": call_messages,
             "max_tokens": 2000,

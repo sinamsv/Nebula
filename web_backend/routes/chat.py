@@ -157,6 +157,7 @@ async def send_message(
     return await _run_turn(
         identity, chat_id, body.input, ai_handler, memory,
         images=None, search_mode=body.tools.search,
+        model=body.model,
     )
 
 
@@ -221,6 +222,7 @@ async def _run_turn(
     memory: MemoryManager,
     images: Optional[list],
     search_mode: str = "smart",
+    model: Optional[str] = None,
 ) -> SendMessageResponse:
     result = await ai_handler.handle_turn(
         source_platform=WEB_PLATFORM,
@@ -231,6 +233,7 @@ async def _run_turn(
         chat_id=chat_id,
         images=images,
         search_mode=search_mode,
+        model=model,
     )
 
     if result.is_blocked:
