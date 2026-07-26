@@ -27,7 +27,7 @@ sys.modules['discord'] = fake_discord
 import tiktoken
 class _FakeEncoding:
     def encode(self, text):
-        return list(range(len(text)))
+        return list(range(max(1, len(text) // 5)))
 tiktoken.encoding_for_model = lambda model: _FakeEncoding()
 
 os.environ['JWT_SECRET'] = 'test-jwt-secret-not-for-production'
@@ -55,7 +55,7 @@ class FakeProvider(BaseProvider):
         self.call_count = 0
         self.last_images = None
 
-    async def call(self, messages, tools, system_prompt, images=None):
+    async def call(self, messages, tools, system_prompt, images=None, model_override=None):
         self.last_images = images
         response = self._responses[self.call_count]
         self.call_count += 1
@@ -225,25 +225,37 @@ def test_admin_review_flow():
 def test_coins_self_only():
     client, db, handler = make_test_client([])
 
-    r = client.post("/api/v1/auth/signup", json={
-        "username": "coinuser", "password": "supersecret123", "bootstrap_key": "test-bootstrap-key",
+    # signup admin user
+    r_admin = client.post("/api/v1/auth/signup", json={
+        "username": "adminuser", "password": "supersecret123", "bootstrap_key": "test-bootstrap-key",
     })
+    admin_token = r_admin.json()["access_token"]
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    admin_id = r_admin.json()["nebula_user_id"]
+
+    # signup regular coinuser
+    r = client.post("/api/v1/auth/signup", json={
+        "username": "coinuser", "password": "supersecret123",
+    })
+    coinuser_id = r.json()["nebula_user_id"]
     token = r.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
+    # Approve coinuser first so they are approved Member
+    db.set_user_approval(coinuser_id, True, approved_by=admin_id)
+
     r = client.get("/api/v1/users/me/coins", headers=headers)
     assert r.status_code == 200
-    assert r.json()["balance"] == 10
+    assert r.json()["balance"] == 50
 
     # admin can modify another user's coins via the id-based endpoint
-    user_id = r.json.__self__ if False else None  # noop, keep structure simple
     nebula_user_id = client.post("/api/v1/auth/signup", json={
         "username": "target_user", "password": "supersecret123",
     }).json()["nebula_user_id"]
 
-    r = client.post(f"/api/v1/users/{nebula_user_id}/coins", json={"amount": 5, "mode": "add"}, headers=headers)
+    r = client.post(f"/api/v1/users/{nebula_user_id}/coins", json={"amount": 5, "mode": "add"}, headers=admin_headers)
     assert r.status_code == 200
-    assert r.json()["new_balance"] == 15
+    assert r.json()["new_balance"] == 50
 
     print("PASS: test_coins_self_only")
 
@@ -317,9 +329,9 @@ def test_search_toggle_removes_search_tool():
     captured_tools = {}
 
     class ToolCapturingProvider(FakeProvider):
-        async def call(self, messages, tools, system_prompt, images=None):
+        async def call(self, messages, tools, system_prompt, images=None, model_override=None):
             captured_tools['tools'] = tools
-            return await super().call(messages, tools, system_prompt, images=images)
+            return await super().call(messages, tools, system_prompt, images=images, model_override=model_override)
 
     tmpdir = tempfile.mkdtemp()
     db = DatabaseManager(db_path=os.path.join(tmpdir, 'test.db'))
@@ -342,7 +354,7 @@ def test_search_toggle_removes_search_tool():
 
     r = client.post(
         f"/api/v1/chat/{chat_id}/messages",
-        json={"input": "hi", "tools": {"search": False}},
+        json={"input": "hi", "tools": {"search": "off"}},
         headers=headers,
     )
     assert r.status_code == 200, r.text

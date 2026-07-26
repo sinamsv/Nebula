@@ -42,6 +42,13 @@ class PlatformsResponse(BaseModel):
 class CoinStatusResponse(BaseModel):
     balance: int
     seconds_until_reset: int
+    daily_limit: Optional[float] = None
+    weekly_limit: Optional[float] = None
+    daily_usage: Optional[float] = None
+    weekly_usage: Optional[float] = None
+    role: Optional[str] = None
+    unlimited_mode: Optional[str] = None
+    unlimited_expires_at: Optional[str] = None
 
 
 class ModifyCoinsRequest(BaseModel):
@@ -52,3 +59,40 @@ class ModifyCoinsRequest(BaseModel):
 class ModifyCoinsResponse(BaseModel):
     nebula_user_id: int
     new_balance: int
+
+
+class UserRoleUpdate(BaseModel):
+    role: Literal["Member", "Trusted", "Researcher", "Admin"]
+    unlimited_mode: Literal["none", "temporary", "permanent"] = "none"
+    unlimited_duration: Optional[Literal["1 day", "1 week", "1 month", "indefinite"]] = None
+
+
+class RoleSettingItem(BaseModel):
+    role: str
+    allowed_models: List[str]
+    allowed_tools: List[str]
+    daily_limit: float
+    weekly_limit: float
+
+
+class RoleSettingsListResponse(BaseModel):
+    settings: List[RoleSettingItem]
+
+
+class RoleSettingsUpdateRequest(BaseModel):
+    role: Literal["Member", "Trusted", "Researcher", "Admin"]
+    allowed_models: List[str]
+    allowed_tools: List[str]
+    daily_limit: float
+    weekly_limit: float
+
+
+class UserUsageResponse(BaseModel):
+    nebula_user_id: int
+    daily_usage: float
+    weekly_usage: float
+    daily_limit: float
+    weekly_limit: float
+    role: str
+    unlimited_mode: str
+    unlimited_expires_at: Optional[str]

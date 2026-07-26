@@ -77,9 +77,24 @@ class DatabaseManager:
                 is_approved INTEGER NOT NULL DEFAULT 0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 approved_at DATETIME,
-                approved_by INTEGER REFERENCES nebula_users(nebula_user_id)
+                approved_by INTEGER REFERENCES nebula_users(nebula_user_id),
+                role TEXT NOT NULL DEFAULT 'Member',
+                unlimited_mode TEXT NOT NULL DEFAULT 'none',
+                unlimited_expires_at DATETIME
             )
         ''')
+
+        cursor.execute("PRAGMA table_info(nebula_users)")
+        existing_user_columns = {row[1] for row in cursor.fetchall()}
+        if 'role' not in existing_user_columns:
+            cursor.execute("ALTER TABLE nebula_users ADD COLUMN role TEXT NOT NULL DEFAULT 'Member'")
+            print("Migrated nebula_users: added role column")
+        if 'unlimited_mode' not in existing_user_columns:
+            cursor.execute("ALTER TABLE nebula_users ADD COLUMN unlimited_mode TEXT NOT NULL DEFAULT 'none'")
+            print("Migrated nebula_users: added unlimited_mode column")
+        if 'unlimited_expires_at' not in existing_user_columns:
+            cursor.execute("ALTER TABLE nebula_users ADD COLUMN unlimited_expires_at DATETIME")
+            print("Migrated nebula_users: added unlimited_expires_at column")
 
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS platform_identities (
@@ -182,6 +197,52 @@ class DatabaseManager:
                 balance INTEGER NOT NULL DEFAULT 10,
                 last_reset DATETIME DEFAULT CURRENT_TIMESTAMP
             )
+        ''')
+
+        # ------------------------------------------------------------
+        # Role settings
+        # ------------------------------------------------------------
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS role_settings (
+                role TEXT PRIMARY KEY,
+                allowed_models TEXT NOT NULL,
+                allowed_tools TEXT NOT NULL,
+                daily_limit REAL NOT NULL,
+                weekly_limit REAL NOT NULL
+            )
+        ''')
+
+        # Seed default role settings
+        default_settings = [
+            ('Member', '["google/gemini-3.1-flash-lite"]', '["search"]', 50.0, 200.0),
+            ('Trusted', '["google/gemini-3.1-flash-lite"]', '["search"]', 150.0, 600.0),
+            ('Researcher', '["google/gemini-3.1-flash-lite"]', '["search"]', 500.0, 2000.0),
+            ('Admin', '["google/gemini-3.1-flash-lite"]', '["search"]', -1.0, -1.0)
+        ]
+        for r_name, models, tools, daily, weekly in default_settings:
+            cursor.execute('''
+                INSERT OR IGNORE INTO role_settings (role, allowed_models, allowed_tools, daily_limit, weekly_limit)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (r_name, models, tools, daily, weekly))
+
+        # ------------------------------------------------------------
+        # Coin transactions (rolling rate limit transaction log)
+        # ------------------------------------------------------------
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS coin_transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nebula_user_id INTEGER NOT NULL REFERENCES nebula_users(nebula_user_id),
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                coin_cost REAL NOT NULL,
+                transaction_type TEXT NOT NULL
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_coin_transactions_user_timestamp
+            ON coin_transactions(nebula_user_id, timestamp)
         ''')
 
         # ------------------------------------------------------------
@@ -292,7 +353,7 @@ class DatabaseManager:
         cursor = conn.cursor()
         cursor.execute('''
             SELECT nebula_user_id, username, password_hash, display_name,
-                   is_admin, is_approved, created_at
+                   is_admin, is_approved, created_at, role, unlimited_mode, unlimited_expires_at
             FROM nebula_users WHERE username = ?
         ''', (username,))
         row = cursor.fetchone()
@@ -302,14 +363,14 @@ class DatabaseManager:
         return {
             'nebula_user_id': row[0], 'username': row[1], 'password_hash': row[2],
             'display_name': row[3], 'is_admin': bool(row[4]), 'is_approved': bool(row[5]),
-            'created_at': row[6]
+            'created_at': row[6], 'role': row[7], 'unlimited_mode': row[8], 'unlimited_expires_at': row[9]
         }
 
     def get_user_by_id(self, nebula_user_id: int) -> Optional[Dict]:
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT nebula_user_id, username, display_name, is_admin, is_approved, created_at
+            SELECT nebula_user_id, username, display_name, is_admin, is_approved, created_at, role, unlimited_mode, unlimited_expires_at
             FROM nebula_users WHERE nebula_user_id = ?
         ''', (nebula_user_id,))
         row = cursor.fetchone()
@@ -318,7 +379,8 @@ class DatabaseManager:
             return None
         return {
             'nebula_user_id': row[0], 'username': row[1], 'display_name': row[2],
-            'is_admin': bool(row[3]), 'is_approved': bool(row[4]), 'created_at': row[5]
+            'is_admin': bool(row[3]), 'is_approved': bool(row[4]), 'created_at': row[5],
+            'role': row[6], 'unlimited_mode': row[7], 'unlimited_expires_at': row[8]
         }
 
     def set_user_approval(self, nebula_user_id: int, approved: bool, approved_by: int) -> bool:
@@ -337,9 +399,81 @@ class DatabaseManager:
     def set_user_admin(self, nebula_user_id: int, is_admin: bool = True) -> bool:
         conn = self.get_connection()
         cursor = conn.cursor()
+        role = 'Admin' if is_admin else 'Member'
         cursor.execute('''
-            UPDATE nebula_users SET is_admin = ? WHERE nebula_user_id = ?
-        ''', (1 if is_admin else 0, nebula_user_id))
+            UPDATE nebula_users SET is_admin = ?, role = ? WHERE nebula_user_id = ?
+        ''', (1 if is_admin else 0, role, nebula_user_id))
+        conn.commit()
+        changed = cursor.rowcount > 0
+        conn.close()
+        return changed
+
+    def set_user_role(self, nebula_user_id: int, role: str, unlimited_mode: str = 'none', unlimited_expires_at: Optional[str] = None) -> bool:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        is_admin = 1 if role == 'Admin' else 0
+        cursor.execute('''
+            UPDATE nebula_users
+            SET role = ?, is_admin = ?, unlimited_mode = ?, unlimited_expires_at = ?
+            WHERE nebula_user_id = ?
+        ''', (role, is_admin, unlimited_mode, unlimited_expires_at, nebula_user_id))
+        conn.commit()
+        changed = cursor.rowcount > 0
+        conn.close()
+        return changed
+
+    def get_role_settings(self, role: str) -> Optional[Dict]:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT role, allowed_models, allowed_tools, daily_limit, weekly_limit
+            FROM role_settings WHERE role = ?
+        ''', (role,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        import json
+        return {
+            'role': row[0],
+            'allowed_models': json.loads(row[1]),
+            'allowed_tools': json.loads(row[2]),
+            'daily_limit': row[3],
+            'weekly_limit': row[4]
+        }
+
+    def get_all_role_settings(self) -> List[Dict]:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT role, allowed_models, allowed_tools, daily_limit, weekly_limit
+            FROM role_settings
+        ''')
+        rows = cursor.fetchall()
+        conn.close()
+        import json
+        return [
+            {
+                'role': r[0],
+                'allowed_models': json.loads(r[1]),
+                'allowed_tools': json.loads(r[2]),
+                'daily_limit': r[3],
+                'weekly_limit': r[4]
+            }
+            for r in rows
+        ]
+
+    def update_role_settings(self, role: str, allowed_models: List[str], allowed_tools: List[str], daily_limit: float, weekly_limit: float) -> bool:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        import json
+        models_str = json.dumps(allowed_models)
+        tools_str = json.dumps(allowed_tools)
+        cursor.execute('''
+            UPDATE role_settings
+            SET allowed_models = ?, allowed_tools = ?, daily_limit = ?, weekly_limit = ?
+            WHERE role = ?
+        ''', (models_str, tools_str, daily_limit, weekly_limit, role))
         conn.commit()
         changed = cursor.rowcount > 0
         conn.close()
@@ -446,7 +580,7 @@ class DatabaseManager:
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT u.nebula_user_id, u.username, u.display_name, u.is_admin, u.is_approved
+            SELECT u.nebula_user_id, u.username, u.display_name, u.is_admin, u.is_approved, u.role, u.unlimited_mode, u.unlimited_expires_at
             FROM platform_identities p
             JOIN nebula_users u ON u.nebula_user_id = p.nebula_user_id
             WHERE p.platform = ? AND p.platform_user_id = ?
@@ -457,7 +591,8 @@ class DatabaseManager:
             return None
         return {
             'nebula_user_id': row[0], 'username': row[1], 'display_name': row[2],
-            'is_admin': bool(row[3]), 'is_approved': bool(row[4])
+            'is_admin': bool(row[3]), 'is_approved': bool(row[4]),
+            'role': row[5], 'unlimited_mode': row[6], 'unlimited_expires_at': row[7]
         }
 
     # ------------------------------------------------------------------

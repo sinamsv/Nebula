@@ -278,6 +278,40 @@ export function getAdminPlatforms(token: string): Promise<PlatformsResponse> {
   return request<PlatformsResponse>("/admin/platforms", { token });
 }
 
+export function updateUserRole(
+  token: string,
+  userId: number,
+  body: any
+): Promise<any> {
+  return request<any>(`/admin/users/${userId}/role`, {
+    method: "PATCH",
+    token,
+    json: body,
+  });
+}
+
+export function getRoleSettings(token: string): Promise<any> {
+  return request<any>("/admin/roles/settings", { token });
+}
+
+export function updateRoleSettings(
+  token: string,
+  body: any
+): Promise<any> {
+  return request<any>("/admin/roles/settings", {
+    method: "PUT",
+    token,
+    json: body,
+  });
+}
+
+export function getUserUsage(
+  token: string,
+  userId: number
+): Promise<any> {
+  return request<any>(`/admin/users/${userId}/usage`, { token });
+}
+
 // ---------------------------------------------------------------------
 // Health
 // ---------------------------------------------------------------------

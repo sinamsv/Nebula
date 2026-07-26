@@ -369,25 +369,10 @@ class AIHandler:
     # ------------------------------------------------------------------
 
     def get_available_tools(self, is_admin: bool, supports_guild_moderation: bool,
-                             search_mode: str = "smart") -> List[Dict]:
-        """Unchanged from the pre-refactor version for Discord/Telegram
-        in every practical sense -- Discord/Telegram never pass
-        search_mode, so they always get the "smart" default, which
-        offers the search tool exactly like the old enable_search=True
-        always did.
-
-        search_mode replaces the old enable_search: bool (confirmed
-        with Sina): "off" omits the tool entirely (old
-        enable_search=False), "smart"/"on" both offer it (old
-        enable_search=True) -- the difference between "smart" and "on"
-        is NOT in which tools are offered, it's in an extra prompt
-        instruction handle_turn() injects for "on" only (see this
-        module's docstring and _SEARCH_ON_INSTRUCTION). This method
-        only cares about tool availability, so "smart" and "on" are
-        handled identically here.
-        """
+                             search_mode: str = "smart", allowed_tools: List[str] = None) -> List[Dict]:
+        """Offers tools filtered by the role's allowed_tools list."""
         tools = []
-        if search_mode != "off":
+        if search_mode != "off" and (allowed_tools is None or "search" in allowed_tools):
             tools.append({
                 "type": "function",
                 "function": {
@@ -401,7 +386,8 @@ class AIHandler:
                 }
             })
 
-        if is_admin and supports_guild_moderation:
+        # Moderation tools are Admin-only
+        if is_admin and supports_guild_moderation and (allowed_tools is None or "moderation" in allowed_tools):
             tools.extend([
                 {
                     "type": "function",
@@ -482,6 +468,7 @@ class AIHandler:
         chat_id: Optional[int] = None,
         images: Optional[List[ImageAttachment]] = None,
         search_mode: str = "smart",
+        model: Optional[str] = None,
     ) -> TurnResult:
         result = TurnResult()
 
@@ -510,12 +497,34 @@ class AIHandler:
                 result.blocked_reason = self.memory.full_memory_message(display_name)
             return result
 
+        # Load user's role settings for model/tool gating and rate-limiting
         if self.coin_manager:
-            spend_result = self.coin_manager.check_and_spend(nebula_user_id, self.coin_manager.MESSAGE_COST)
-            if not spend_result['success']:
-                result.blocked_reason = self.coin_manager.insufficient_funds_message(
-                    display_name, spend_result['seconds_until_reset']
-                )
+            role_info = self.coin_manager.get_user_role_and_limits(nebula_user_id)
+            role = role_info['role']
+        else:
+            user_info = self.db.get_user_by_id(nebula_user_id)
+            role = user_info['role'] if user_info else 'Member'
+
+        role_settings = self.db.get_role_settings(role)
+        allowed_tools = role_settings['allowed_tools'] if role_settings else ["search"]
+        allowed_models = role_settings['allowed_models'] if role_settings else ["google/gemini-3.1-flash-lite"]
+
+        # 1. Gate AI Model
+        raw_ai_models = os.getenv('AI_MODEL', '')
+        env_models = [m.strip() for m in raw_ai_models.split(',')] if raw_ai_models else []
+
+        chosen_model = model
+        if not chosen_model:
+            chosen_model = env_models[0] if env_models else None
+
+        if chosen_model:
+            # If the specific model is not in the list of models configured by the admin, block
+            if env_models and chosen_model not in env_models:
+                result.blocked_reason = f"❌ Model '{chosen_model}' is not configured in this deployment."
+                return result
+            # If user doesn't have permission for this model, block
+            if role != 'Admin' and chosen_model not in allowed_models:
+                result.blocked_reason = f"❌ Your role '{role}' is not permitted to use model '{chosen_model}'."
                 return result
 
         conversation_history = self.memory.get_conversation_context(nebula_user_id, chat_id=chat_id)
@@ -524,6 +533,22 @@ class AIHandler:
 
         messages = list(conversation_history)
         messages.append({"role": "user", "content": f"[{display_name}]: {message_text}"})
+
+        # Calculate exact exact-fraction projected input cost upfront
+        turn_system_prompt = self.system_prompt
+        if search_mode == "on":
+            turn_system_prompt = self.system_prompt + _SEARCH_ON_INSTRUCTION
+
+        # 2. Gate rate limits
+        if self.coin_manager:
+            input_tokens = sum(self.memory.count_tokens(m['content']) for m in messages) + self.memory.count_tokens(turn_system_prompt)
+            projected_cost = input_tokens * self.coin_manager.INPUT_TOKEN_MULTIPLIER
+            spend_result = self.coin_manager.check_and_spend(nebula_user_id, projected_cost, 'input_tokens')
+            if not spend_result['success']:
+                result.blocked_reason = self.coin_manager.insufficient_funds_message(
+                    display_name, spend_result['seconds_until_reset']
+                )
+                return result
 
         # NOTE (existing, pre-refactor behavior, deliberately preserved
         # as-is per explicit instruction not to change this without
@@ -538,41 +563,14 @@ class AIHandler:
             nebula_user_id, "user", message_text, source_platform, chat_id=chat_id
         )
 
-        # search_mode == "on" gets one extra paragraph appended to the
-        # system prompt for THIS turn only -- never written back to
-        # self.system_prompt, never persisted, never seen in "smart" or
-        # "off" mode. See _SEARCH_ON_INSTRUCTION's docstring for why
-        # this is a nudge rather than a forced tool_choice.
-        turn_system_prompt = self.system_prompt
-        if search_mode == "on":
-            turn_system_prompt = self.system_prompt + _SEARCH_ON_INSTRUCTION
-
-        # Bounded, provider-agnostic tool-calling loop. Shape unchanged
-        # from the pre-refactor version (see MAX_TOOL_ROUNDS docstring
-        # above and the bug this loop originally fixed), except that
-        # every provider-specific detail (how to call the model, how to
-        # append a tool round to the running message list) now goes
-        # through self.provider's two normalized methods instead of
-        # inline OpenAI-specific code. The loop itself has no idea
-        # which SDK is behind self.provider.
-        #
-        # `images` is only ever meaningful on the FIRST call() of a
-        # turn (round one) -- see ai/providers/base.py's docstring.
-        # Passing it unconditionally into every round's call() is safe
-        # because every provider's call() only attaches images to the
-        # LAST message, and on round 2+ the last message is a
-        # synthesized tool-round message, not the original user turn --
-        # so in practice images only ever actually get attached on
-        # round one, but we still only pass it explicitly on round one
-        # below to keep that guarantee obvious at the call site rather
-        # than relying on each provider's internal indexing.
         final_content = None
-        tools = self.get_available_tools(is_admin, supports_guild_moderation, search_mode=search_mode)
+        tools = self.get_available_tools(is_admin, supports_guild_moderation, search_mode=search_mode, allowed_tools=allowed_tools)
         for round_index in range(self.MAX_TOOL_ROUNDS):
             try:
                 response = await self.provider.call(
                     messages, tools, turn_system_prompt,
                     images=images if round_index == 0 else None,
+                    model_override=chosen_model,
                 )
             except Exception as e:
                 print(f"Error calling AI backend: {e}")
@@ -585,6 +583,10 @@ class AIHandler:
 
             tool_results = []
             for tool_call in response.tool_calls:
+                # Log non-search tool calls as 2.0 flat
+                if tool_call.name != "search" and self.coin_manager:
+                    self.coin_manager.check_and_spend(nebula_user_id, 2.0, 'tool_call')
+
                 tool_result = await self._execute_tool(
                     tool_call.name, tool_call.arguments, nebula_user_id, display_name,
                     identity, discord_guild
@@ -604,6 +606,11 @@ class AIHandler:
             await self.memory.add_message_to_memory(
                 nebula_user_id, "assistant", final_content, source_platform, chat_id=chat_id
             )
+            # Log exact exact-fraction output cost
+            if self.coin_manager:
+                output_tokens = self.memory.count_tokens(final_content)
+                output_cost = output_tokens * self.coin_manager.OUTPUT_TOKEN_MULTIPLIER
+                self.coin_manager.check_and_spend(nebula_user_id, output_cost, 'output_tokens')
 
         result.memory_warning = self.memory.approaching_full_warning(usage_after_user_msg)
         return result
@@ -611,9 +618,23 @@ class AIHandler:
     async def _execute_tool(self, function_name: str, function_args: Dict, nebula_user_id: int,
                              display_name: str, identity: Dict, discord_guild) -> Optional[str]:
         try:
+            if self.coin_manager:
+                info = self.coin_manager.get_user_role_and_limits(nebula_user_id)
+                role = info['role']
+            else:
+                user_info = self.db.get_user_by_id(nebula_user_id)
+                role = user_info['role'] if user_info else 'Member'
+
+            role_settings = self.db.get_role_settings(role)
+            allowed_tools = role_settings['allowed_tools'] if role_settings else ["search"]
+
+            # Gate execution of search tool
             if function_name == "search":
+                if role != 'Admin' and "search" not in allowed_tools:
+                    return f"❌ Error: Your role '{role}' is not permitted to use the search tool."
+
                 if self.coin_manager:
-                    spend_result = self.coin_manager.check_and_spend(nebula_user_id, self.coin_manager.SEARCH_COST)
+                    spend_result = self.coin_manager.check_and_spend(nebula_user_id, self.coin_manager.SEARCH_COST, 'search_tool')
                     if not spend_result['success']:
                         return self.coin_manager.insufficient_funds_message(
                             display_name, spend_result['seconds_until_reset']

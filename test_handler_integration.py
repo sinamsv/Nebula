@@ -27,7 +27,7 @@ sys.modules['discord'] = fake_discord
 import tiktoken
 class _FakeEncoding:
     def encode(self, text):
-        return list(range(len(text)))
+        return list(range(max(1, len(text) // 5)))
 tiktoken.encoding_for_model = lambda model: _FakeEncoding()
 
 from core.database import DatabaseManager
@@ -49,7 +49,7 @@ class FakeProvider(BaseProvider):
         self.call_count = 0
         self.append_tool_round_calls = []
 
-    async def call(self, messages, tools, system_prompt, images=None):
+    async def call(self, messages, tools, system_prompt, images=None, model_override=None):
         response = self._responses[self.call_count]
         self.call_count += 1
         return response
@@ -234,8 +234,14 @@ def test_handle_turn_unconfigured_provider_still_blocks_gracefully():
     assert "AI_PROVIDER" not in result.blocked_reason
     assert "AI_API_KEY" not in result.blocked_reason
 
+    # Calculate exact exact-fraction projected input cost upfront
+    turn_system_prompt = handler.system_prompt
+    messages = [{"role": "user", "content": f"[Test User]: hello?"}]
+    input_tokens = sum(memory.count_tokens(m['content']) for m in messages) + memory.count_tokens(turn_system_prompt)
+    projected_cost = input_tokens * coins.INPUT_TOKEN_MULTIPLIER
+
     balance_after = coins.get_status(nebula_user_id)['balance']
-    assert balance_after == balance_before - CoinManager.MESSAGE_COST, (
+    assert balance_after == int(balance_before - projected_cost), (
         "pre-existing behavior (coin spent before provider-configured check) "
         "must remain unchanged by this refactor"
     )

@@ -109,6 +109,13 @@ export interface SendMessageResponse {
 export interface CoinStatusResponse {
   balance: number;
   seconds_until_reset: number;
+  daily_limit?: number;
+  weekly_limit?: number;
+  daily_usage?: number;
+  weekly_usage?: number;
+  role?: string;
+  unlimited_mode?: string;
+  unlimited_expires_at?: string;
 }
 
 export interface ModifyCoinsRequest {
@@ -119,6 +126,43 @@ export interface ModifyCoinsRequest {
 export interface ModifyCoinsResponse {
   nebula_user_id: number;
   new_balance: number;
+}
+
+export interface UserRoleUpdate {
+  role: "Member" | "Trusted" | "Researcher" | "Admin";
+  unlimited_mode: "none" | "temporary" | "permanent";
+  unlimited_duration?: "1 day" | "1 week" | "1 month" | "indefinite";
+}
+
+export interface RoleSettingItem {
+  role: string;
+  allowed_models: string[];
+  allowed_tools: string[];
+  daily_limit: number;
+  weekly_limit: number;
+}
+
+export interface RoleSettingsListResponse {
+  settings: RoleSettingItem[];
+}
+
+export interface RoleSettingsUpdateRequest {
+  role: "Member" | "Trusted" | "Researcher" | "Admin";
+  allowed_models: string[];
+  allowed_tools: string[];
+  daily_limit: number;
+  weekly_limit: number;
+}
+
+export interface UserUsageResponse {
+  nebula_user_id: number;
+  daily_usage: number;
+  weekly_usage: number;
+  daily_limit: number;
+  weekly_limit: number;
+  role: string;
+  unlimited_mode: string;
+  unlimited_expires_at: string | null;
 }
 
 // ---------------------------------------------------------------------
