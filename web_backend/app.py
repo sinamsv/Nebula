@@ -42,7 +42,7 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(
         title="Nebula Web API",
-        version="1.5.0",
+        version="1.7.0",
         description="Web adapter for Nebula -- platform='web', thin HTTP layer over core/ and ai/.",
     )
 

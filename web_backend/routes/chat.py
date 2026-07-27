@@ -50,9 +50,28 @@ from web_backend.schemas.chat import (
     RenameChatRequest,
     SendMessageRequest,
     SendMessageResponse,
+    AvailableModelItem,
+    AvailableModelsResponse,
 )
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
+
+
+@router.get("/models", response_model=AvailableModelsResponse)
+async def list_available_models(
+    identity: dict = Depends(require_approved_identity_web),
+    db: DatabaseManager = Depends(get_db),
+):
+    user_info = db.get_user_by_id(identity['nebula_user_id'])
+    role = user_info['role'] if user_info else 'Member'
+    all_models = db.get_all_models()
+
+    available = []
+    for m in all_models:
+        if role == 'Admin' or role in m['allowed_roles']:
+            available.append(AvailableModelItem(model_id=m['model_id'], display_name=m['display_name']))
+
+    return AvailableModelsResponse(models=available)
 
 # Mirrors ai/providers/base.py's ImageAttachment.mime_type docstring:
 # the closed set Anthropic's SDK enumerates, which OpenAI/Google also
@@ -166,6 +185,7 @@ async def send_message_with_image(
     chat_id: int,
     text: str = "",
     image: UploadFile = File(...),
+    model: Optional[str] = None,
     identity: dict = Depends(require_approved_identity_web),
     db: DatabaseManager = Depends(get_db),
     memory: MemoryManager = Depends(get_memory),
@@ -211,7 +231,7 @@ async def send_message_with_image(
     # the multipart image endpoint (confirmed shape carries only text +
     # image), so this uses the same default ToolToggles().search would
     # produce.
-    return await _run_turn(identity, chat_id, message_text, ai_handler, memory, images=[attachment], search_mode="smart")
+    return await _run_turn(identity, chat_id, message_text, ai_handler, memory, images=[attachment], search_mode="smart", model=model)
 
 
 async def _run_turn(

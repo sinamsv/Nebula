@@ -35,6 +35,27 @@ function DashboardShell({ children }: { children: ReactNode }) {
   const [aiConfigured, setAiConfigured] = useState(true);
   const [healthChecked, setHealthChecked] = useState(false);
 
+  const [viewportHeight, setViewportHeight] = useState<string>("100dvh");
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+
+    const handler = () => {
+      if (window.visualViewport) {
+        setViewportHeight(`${window.visualViewport.height}px`);
+      }
+    };
+
+    window.visualViewport.addEventListener("resize", handler);
+    window.visualViewport.addEventListener("scroll", handler);
+    handler();
+
+    return () => {
+      window.visualViewport?.removeEventListener("resize", handler);
+      window.visualViewport?.removeEventListener("scroll", handler);
+    };
+  }, []);
+
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
@@ -75,7 +96,7 @@ function DashboardShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex overflow-hidden" style={{ height: viewportHeight }}>
       <DashboardSidebar
         collapsed={collapsed}
         onToggleCollapsed={toggleCollapsed}

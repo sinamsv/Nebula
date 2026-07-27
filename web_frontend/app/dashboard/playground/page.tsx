@@ -188,7 +188,7 @@ export default function PlaygroundPage() {
     }
   }
 
-  async function handleSendText(text: string, searchMode: SearchMode) {
+  async function handleSendText(text: string, searchMode: SearchMode, model?: string) {
     if (!token) return;
     setError(null);
     const chatId = await ensureActiveChat();
@@ -206,7 +206,7 @@ export default function PlaygroundPage() {
     setIsSending(true);
 
     try {
-      const res = await sendMessage(token, chatId, text, { search: searchMode });
+      const res = await sendMessage(token, chatId, text, { search: searchMode }, model);
       if (res.reply_text) {
         setMessages((prev) => [
           ...prev,
@@ -229,7 +229,7 @@ export default function PlaygroundPage() {
     }
   }
 
-  async function handleSendImage(file: File, text: string) {
+  async function handleSendImage(file: File, text: string, model?: string) {
     if (!token) return;
     setError(null);
     const chatId = await ensureActiveChat();
@@ -247,7 +247,7 @@ export default function PlaygroundPage() {
     setIsSending(true);
 
     try {
-      const res = await sendImageMessage(token, chatId, file, text);
+      const res = await sendImageMessage(token, chatId, file, text, model);
       if (res.reply_text) {
         setMessages((prev) => [
           ...prev,

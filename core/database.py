@@ -227,6 +227,28 @@ class DatabaseManager:
             ''', (r_name, models, tools, daily, weekly))
 
         # ------------------------------------------------------------
+        # Models configuration (JSON-backed DB Table)
+        # ------------------------------------------------------------
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS models_config (
+                model_id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                allowed_roles TEXT NOT NULL
+            )
+        ''')
+
+        # Seed default models config
+        default_models = [
+            ('google/gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite', '["Member", "Trusted", "Researcher", "Admin"]')
+        ]
+        for m_id, name, roles in default_models:
+            cursor.execute('''
+                INSERT OR IGNORE INTO models_config (model_id, display_name, allowed_roles)
+                VALUES (?, ?, ?)
+            ''', (m_id, name, roles))
+
+        # ------------------------------------------------------------
         # Coin transactions (rolling rate limit transaction log)
         # ------------------------------------------------------------
 
@@ -417,6 +439,56 @@ class DatabaseManager:
             SET role = ?, is_admin = ?, unlimited_mode = ?, unlimited_expires_at = ?
             WHERE nebula_user_id = ?
         ''', (role, is_admin, unlimited_mode, unlimited_expires_at, nebula_user_id))
+        conn.commit()
+        changed = cursor.rowcount > 0
+        conn.close()
+        return changed
+
+    def count_admins(self) -> int:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM nebula_users WHERE is_admin = 1')
+        count = cursor.fetchone()[0]
+        conn.close()
+        return count
+
+    def get_all_models(self) -> List[Dict]:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT model_id, display_name, allowed_roles FROM models_config')
+        rows = cursor.fetchall()
+        conn.close()
+        import json
+        return [
+            {
+                'model_id': r[0],
+                'display_name': r[1],
+                'allowed_roles': json.loads(r[2])
+            }
+            for r in rows
+        ]
+
+    def save_model(self, model_id: str, display_name: str, allowed_roles: List[str]) -> bool:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        import json
+        roles_str = json.dumps(allowed_roles)
+        cursor.execute('''
+            INSERT INTO models_config (model_id, display_name, allowed_roles)
+            VALUES (?, ?, ?)
+            ON CONFLICT(model_id) DO UPDATE SET
+                display_name = excluded.display_name,
+                allowed_roles = excluded.allowed_roles
+        ''', (model_id, display_name, roles_str))
+        conn.commit()
+        changed = cursor.rowcount > 0
+        conn.close()
+        return changed
+
+    def delete_model(self, model_id: str) -> bool:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM models_config WHERE model_id = ?', (model_id,))
         conn.commit()
         changed = cursor.rowcount > 0
         conn.close()

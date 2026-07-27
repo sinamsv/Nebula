@@ -30,8 +30,6 @@ import type {
   HealthResponse,
   LoginRequest,
   LoginResponse,
-  ModifyCoinsRequest,
-  ModifyCoinsResponse,
   PendingUsersResponse,
   PlatformsResponse,
   ReviewUserRequest,
@@ -41,6 +39,10 @@ import type {
   SignupResponse,
   SyncCodeResponse,
   ToolToggles,
+  UserLookupResponse,
+  ModelConfigItem,
+  AvailableModelItem,
+  AvailableModelsResponse,
 } from "@/types/api";
 import { ApiError } from "@/types/api";
 
@@ -197,12 +199,13 @@ export function sendMessage(
   token: string,
   chatId: number,
   input: string,
-  tools: ToolToggles = { search: "smart" }
+  tools: ToolToggles = { search: "smart" },
+  model?: string
 ): Promise<SendMessageResponse> {
   return request<SendMessageResponse>(`/chat/${chatId}/messages`, {
     method: "POST",
     token,
-    json: { input, tools },
+    json: { input, tools, model },
   });
 }
 
@@ -210,7 +213,8 @@ export function sendImageMessage(
   token: string,
   chatId: number,
   file: File,
-  text: string
+  text: string,
+  model?: string
 ): Promise<SendMessageResponse> {
   const formData = new FormData();
   formData.append("image", file);
@@ -218,7 +222,7 @@ export function sendImageMessage(
     method: "POST",
     token,
     formData,
-    query: { text },
+    query: { text, model },
   });
 }
 
@@ -228,18 +232,6 @@ export function sendImageMessage(
 
 export function getMyCoins(token: string): Promise<CoinStatusResponse> {
   return request<CoinStatusResponse>("/users/me/coins", { token });
-}
-
-export function modifyUserCoins(
-  token: string,
-  userId: number,
-  body: ModifyCoinsRequest
-): Promise<ModifyCoinsResponse> {
-  return request<ModifyCoinsResponse>(`/users/${userId}/coins`, {
-    method: "POST",
-    token,
-    json: body,
-  });
 }
 
 // ---------------------------------------------------------------------
@@ -257,6 +249,37 @@ export function generateSyncCode(token: string, platform: string): Promise<SyncC
 // ---------------------------------------------------------------------
 // Admin
 // ---------------------------------------------------------------------
+
+export function lookupUserByUsername(token: string, username: string): Promise<UserLookupResponse> {
+  return request<UserLookupResponse>("/admin/users/lookup", {
+    token,
+    query: { username },
+  });
+}
+
+export function getAvailableModels(token: string): Promise<AvailableModelsResponse> {
+  return request<AvailableModelsResponse>("/chat/models", { token });
+}
+
+export function getAdminModels(token: string): Promise<{ models: ModelConfigItem[] }> {
+  return request<{ models: ModelConfigItem[] }>("/admin/models", { token });
+}
+
+export function saveAdminModel(token: string, body: ModelConfigItem): Promise<ModelConfigItem> {
+  return request<ModelConfigItem>("/admin/models", {
+    method: "POST",
+    token,
+    json: body,
+  });
+}
+
+export function deleteAdminModel(token: string, modelId: string): Promise<void> {
+  return request<void>("/admin/models", {
+    method: "DELETE",
+    token,
+    query: { model_id: modelId },
+  });
+}
 
 export function getPendingUsers(token: string): Promise<PendingUsersResponse> {
   return request<PendingUsersResponse>("/admin/users/pending", { token });

@@ -85,6 +85,7 @@ export interface ToolToggles {
 export interface SendMessageRequest {
   input: string;
   tools?: ToolToggles;
+  model?: string;
 }
 
 export interface MemoryUsage {
@@ -116,16 +117,6 @@ export interface CoinStatusResponse {
   role?: string;
   unlimited_mode?: string;
   unlimited_expires_at?: string;
-}
-
-export interface ModifyCoinsRequest {
-  amount: number;
-  mode: "add" | "set";
-}
-
-export interface ModifyCoinsResponse {
-  nebula_user_id: number;
-  new_balance: number;
 }
 
 export interface UserRoleUpdate {
@@ -209,6 +200,28 @@ export interface ReviewUserResponse {
   nebula_user_id: number;
   username: string;
   approved: boolean;
+}
+
+export interface UserLookupResponse {
+  nebula_user_id: number;
+  username: string;
+  display_name: string;
+  role: "Member" | "Trusted" | "Researcher" | "Admin";
+}
+
+export interface ModelConfigItem {
+  model_id: string;
+  display_name: string;
+  allowed_roles: string[];
+}
+
+export interface AvailableModelItem {
+  model_id: string;
+  display_name: string;
+}
+
+export interface AvailableModelsResponse {
+  models: AvailableModelItem[];
 }
 
 // ---------------------------------------------------------------------

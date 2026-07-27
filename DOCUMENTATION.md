@@ -160,7 +160,6 @@ This is a **hard cap, not an auto-reset** — unchanged principle from before 1.
 
 Unchanged from 1.4.0 in mechanics (10 starting coins, 1/message, 2/search, 8-hour non-stacking reset, shared globally per account across every platform including web). Web-specific access:
 - `GET /api/v1/users/me/coins`: self-only — returns the caller's own balance. There is deliberately no `GET /api/v1/users/{id}/coins` for viewing someone else's balance (confirmed scope for this release; the closest existing admin capability is Discord's broader `user_activity_check` tool, which reports memory usage but not coin balance).
-- `POST /api/v1/users/{id}/coins`: admin-only, add-to or set a target user's balance by `nebula_user_id` — the web-native equivalent of Discord/Telegram's `/add_coin`, same body shape (`{"amount": int, "mode": "add"|"set"}`).
 
 ## Admin Tools
 
@@ -213,10 +212,14 @@ Base path: `/api/v1`.
 | `/chat/{id}` | DELETE | approved, owner | Delete a chat and its history |
 | `/chat/{id}/messages` | POST | approved, owner | Send a text message, get Nebula's reply |
 | `/chat/{id}/messages/image` | POST | approved, owner | Send a message with an attached image (multipart/form-data) |
+| `/chat/models` | GET | approved | Available AI models gated by role |
 | `/users/me/coins` | GET | approved | Caller's own coin balance |
-| `/users/{id}/coins` | POST | admin | Add to or set a user's coin balance |
 | `/sync/{platform}` | POST | approved | Generate a one-time code to link Discord or Telegram |
 | `/platforms` | GET | none | Static list of linkable platforms |
+| `/admin/models` | GET | admin | List all configured AI models |
+| `/admin/models` | POST | admin | Create or update an AI model configuration |
+| `/admin/models` | DELETE | admin | Delete an AI model configuration |
+| `/admin/users/lookup` | GET | admin | Lookup a user's information by username |
 | `/admin/users/pending` | GET | admin | List accounts awaiting approval |
 | `/admin/users/{id}/review` | POST | admin | Approve or reject a pending account |
 | `/admin/platforms` | GET | admin | Static list of all platforms this deployment supports |

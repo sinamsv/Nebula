@@ -51,16 +51,6 @@ class CoinStatusResponse(BaseModel):
     unlimited_expires_at: Optional[str] = None
 
 
-class ModifyCoinsRequest(BaseModel):
-    amount: int
-    mode: Literal["add", "set"] = "add"
-
-
-class ModifyCoinsResponse(BaseModel):
-    nebula_user_id: int
-    new_balance: int
-
-
 class UserRoleUpdate(BaseModel):
     role: Literal["Member", "Trusted", "Researcher", "Admin"]
     unlimited_mode: Literal["none", "temporary", "permanent"] = "none"
@@ -96,3 +86,20 @@ class UserUsageResponse(BaseModel):
     role: str
     unlimited_mode: str
     unlimited_expires_at: Optional[str]
+
+
+class UserLookupResponse(BaseModel):
+    nebula_user_id: int
+    username: str
+    display_name: str
+    role: str
+
+
+class ModelConfigItem(BaseModel):
+    model_id: str
+    display_name: str
+    allowed_roles: List[str]
+
+
+class ModelConfigListResponse(BaseModel):
+    models: List[ModelConfigItem]

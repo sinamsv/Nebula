@@ -79,3 +79,12 @@ class SendMessageResponse(BaseModel):
     tool_messages: List[str]
     memory_warning: Optional[str]
     usage: Dict
+
+
+class AvailableModelItem(BaseModel):
+    model_id: str
+    display_name: str
+
+
+class AvailableModelsResponse(BaseModel):
+    models: List[AvailableModelItem]
