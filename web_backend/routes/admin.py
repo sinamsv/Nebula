@@ -29,6 +29,9 @@ from web_backend.schemas.admin import (
     RoleSettingItem,
     RoleSettingsListResponse,
     RoleSettingsUpdateRequest,
+    UserLookupResponse,
+    ModelConfigItem,
+    ModelConfigListResponse,
 )
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
@@ -47,6 +50,26 @@ _ADMIN_PLATFORMS = [
     PlatformInfo(id="telegram", name="Telegram", supports_guild_moderation=False),
     PlatformInfo(id="web", name="Web", supports_guild_moderation=False),
 ]
+
+
+@router.get("/users/lookup", response_model=UserLookupResponse)
+async def lookup_user(
+    username: str,
+    admin_identity: dict = Depends(require_admin_identity_web),
+    db: DatabaseManager = Depends(get_db),
+):
+    user = db.get_user_by_username(username)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No Nebula account found with that username."
+        )
+    return UserLookupResponse(
+        nebula_user_id=user['nebula_user_id'],
+        username=user['username'],
+        display_name=user['display_name'],
+        role=user['role']
+    )
 
 
 @router.get("/users/pending", response_model=PendingUsersResponse)
@@ -104,6 +127,15 @@ async def update_user_role(
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No Nebula account found with that id.")
 
+    # Prevent self-demotion if this is the ONLY admin in the system
+    if user_id == admin_identity['nebula_user_id'] and body.role != 'Admin':
+        admin_count = db.count_admins()
+        if admin_count <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot demote yourself because you are the only admin in the system. At least one admin must exist."
+            )
+
     unlimited_expires_at = None
     unlimited_mode = body.unlimited_mode
     if body.role == 'Researcher':
@@ -145,6 +177,41 @@ async def update_user_role(
         unlimited_mode=usage_info['unlimited_mode'],
         unlimited_expires_at=usage_info['unlimited_expires_at']
     )
+
+
+@router.get("/models", response_model=ModelConfigListResponse)
+async def list_admin_models(
+    admin_identity: dict = Depends(require_admin_identity_web),
+    db: DatabaseManager = Depends(get_db),
+):
+    models = db.get_all_models()
+    return ModelConfigListResponse(models=[
+        ModelConfigItem(
+            model_id=m['model_id'],
+            display_name=m['display_name'],
+            allowed_roles=m['allowed_roles']
+        )
+        for m in models
+    ])
+
+
+@router.post("/models", response_model=ModelConfigItem)
+async def save_admin_model(
+    body: ModelConfigItem,
+    admin_identity: dict = Depends(require_admin_identity_web),
+    db: DatabaseManager = Depends(get_db),
+):
+    db.save_model(body.model_id, body.display_name, body.allowed_roles)
+    return body
+
+
+@router.delete("/models", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_admin_model(
+    model_id: str,
+    admin_identity: dict = Depends(require_admin_identity_web),
+    db: DatabaseManager = Depends(get_db),
+):
+    db.delete_model(model_id)
 
 
 @router.get("/roles/settings", response_model=RoleSettingsListResponse)

@@ -13,7 +13,7 @@ Nebula is an AI-powered assistant reachable from **Discord, Telegram, and a web 
 ## ✨ Features
 
 ### 🤖 AI-Powered Conversations
-- Natural language processing, model configurable via `AI_MODEL` across six providers (OpenAI, Anthropic, Google, xAI, OpenRouter, Groq)
+- Natural language processing, model configurable dynamically via the admin panel across six providers (OpenAI, Anthropic, Google, xAI, OpenRouter, Groq)
 - Context-aware responses that remember previous conversations — **across platforms**, not just within one (Discord/Telegram) — or scoped to an individual chat (web's multi-chat mode)
 - Addresses users by their display name for personal engagement
 - Handles replies to messages intelligently, on Discord and Telegram
@@ -54,7 +54,7 @@ Codes expire after 10 minutes and can only be used once. Linking is deliberately
 - **Starting Balance**: every account starts with **10 coins**, shared globally (not per-guild, per-chat, or per-platform).
 - **Consumption**: 1 coin per AI message, 2 coins per web search.
 - **Automatic Reset**: back to 10 (non-stacking) every 8 hours.
-- `/coin` (Discord/Telegram) or `GET /api/v1/users/me/coins` (web) to check your balance; `/add_coin` (Discord/Telegram, admin-only) or `POST /api/v1/users/{id}/coins` (web, admin-only) to grant or set someone's balance.
+- `/coin` (Discord/Telegram) or `GET /api/v1/users/me/coins` (web) to check your balance; `/add_coin` (Discord/Telegram, admin-only) to grant or set someone's balance.
 
 ### 🔍 Web Search Integration
 - Google Custom Search or Tavily (an AI-native search API) — pick one via `SEARCH_PROVIDER`
@@ -261,6 +261,8 @@ See DOCUMENTATION.md's "Web Panel" section for the full API surface.
 | `POST /api/v1/chat/{id}/messages(/image)` | Approved | Chat with Nebula, optionally with an image |
 | `POST /api/v1/sync/{platform}` | Approved | Generate a code to link Discord or Telegram |
 | `GET /api/v1/users/me/coins` | Approved | Your own coin balance |
+| `GET /api/v1/chat/models` | Approved | Available AI models gated by role |
+| `GET`/`POST`/`DELETE /api/v1/admin/models` | Admin | Manage AI model configurations |
 | `GET /api/v1/admin/users/pending`, `POST /api/v1/admin/users/{id}/review` | Admin | Review pending signups |
 
 Admin moderation commands (kick, ban, create channel) remain Discord-only today.
@@ -323,6 +325,7 @@ Schema is organized around **Nebula accounts**, not guilds, channels, or web ses
 | `coin_balances` | Nebula Coin balance and reset timer, per `nebula_user_id`, global across platforms |
 | `oauth_connections` | **(New in 1.5.0)** Encrypted OAuth tokens (Google), per `(nebula_user_id, provider)` |
 | `admin_actions_log` | Every admin action, across every platform |
+| `models_config` | **(New in 1.7.0)** AI model configurations, display names, and role-based gating |
 | `bootstrap_state` | Tracks whether the one-time `ADMIN_BOOTSTRAP_KEY` has been claimed |
 | `server_settings` | Discord-specific, legacy per-guild settings |
 
@@ -335,7 +338,7 @@ Schema is organized around **Nebula accounts**, not guilds, channels, or web ses
 
 ### AI Configuration
 - **Provider**: set via `AI_PROVIDER` + `AI_API_KEY`. See `ai/config.json` for per-provider `base_url`/`temperature`/`thinking_level` settings.
-- **Model**: set via `AI_MODEL`.
+- **Model**: dynamically managed via the web admin panel (stored in `models_config` table). If `AI_MODEL` is set in `.env` it acts as a secondary fallback.
 - **Max Tokens**: 2000 per response.
 - **Multimodal images**: web-only, real forwarding to the model (not a text placeholder) — see DOCUMENTATION.md.
 - **Legacy config**: `OPENAI_API_KEY` + `OPENAI_BASE_URL` still works if set, but is deprecated.

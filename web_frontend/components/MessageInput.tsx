@@ -1,11 +1,13 @@
 "use client";
 
-import { useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
-import { Send, X } from "lucide-react";
+import { useRef, useState, useEffect, type ChangeEvent, type KeyboardEvent } from "react";
+import { ArrowUp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import PlusMenu from "@/components/PlusMenu";
 import ModelSelector from "@/components/ModelSelector";
-import type { SearchMode } from "@/types/api";
+import type { SearchMode, AvailableModelItem } from "@/types/api";
+import { useAuth } from "@/lib/AuthContext";
+import { getAvailableModels } from "@/lib/api";
 
 const ALLOWED_IMAGE_TYPES = [
     "image/jpeg",
@@ -16,8 +18,8 @@ const ALLOWED_IMAGE_TYPES = [
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB, matches backend limit
 
 interface MessageInputProps {
-    onSendText: (text: string, searchMode: SearchMode) => void;
-    onSendImage: (file: File, text: string) => void;
+    onSendText: (text: string, searchMode: SearchMode, model?: string) => void;
+    onSendImage: (file: File, text: string, model?: string) => void;
     disabled: boolean;
     /** True while centered in the empty-state layout -- controls the
      * "elevated hero" visual treatment vs. the flatter docked-at-bottom
@@ -41,6 +43,7 @@ export default function MessageInput({
     disabled,
     variant = "docked",
 }: MessageInputProps) {
+    const { token } = useAuth();
     const [text, setText] = useState("");
     const [searchMode, setSearchMode] = useState<SearchMode>("smart");
     const [attachedImage, setAttachedImage] = useState<File | null>(null);
@@ -48,6 +51,23 @@ export default function MessageInput({
     const [imageError, setImageError] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+    const [models, setModels] = useState<AvailableModelItem[]>([]);
+    const [selectedModel, setSelectedModel] = useState<AvailableModelItem | null>(null);
+
+    useEffect(() => {
+        if (!token) return;
+        getAvailableModels(token)
+            .then((res) => {
+                setModels(res.models);
+                if (res.models.length > 0) {
+                    setSelectedModel(res.models[0]);
+                }
+            })
+            .catch(() => {
+                // Ignore or fallback
+            });
+    }, [token]);
 
     function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
         const file = e.target.files?.[0];
@@ -90,7 +110,7 @@ export default function MessageInput({
 
         if (attachedImage) {
             if (!trimmed && !attachedImage) return;
-            onSendImage(attachedImage, trimmed);
+            onSendImage(attachedImage, trimmed, selectedModel?.model_id);
             removeImage();
             setText("");
             requestAnimationFrame(autoGrow);
@@ -98,7 +118,7 @@ export default function MessageInput({
         }
 
         if (!trimmed) return;
-        onSendText(trimmed, searchMode);
+        onSendText(trimmed, searchMode, selectedModel?.model_id);
         setText("");
         requestAnimationFrame(autoGrow);
     }
@@ -117,7 +137,7 @@ export default function MessageInput({
         <div className="w-full">
             <div
                 className={cn(
-                    "rounded-3xl border bg-nebula-surface/70 p-2.5 backdrop-blur-xl transition-shadow duration-300",
+                    "rounded-3xl border bg-nebula-surface/70 p-2.5 backdrop-blur-xl transition-shadow duration-300 focus-within:border-nebula-purple/40",
                     variant === "hero"
                         ? "border-nebula-border-hover shadow-glow"
                         : "border-nebula-border shadow-composer"
@@ -172,7 +192,7 @@ export default function MessageInput({
                             ? "Add a caption (optional)..."
                             : "Message Nebula..."
                     }
-                    className="max-h-[200px] min-h-[2.75rem] w-full resize-none bg-transparent px-2 py-1.5 text-sm text-nebula-text placeholder:text-nebula-text-secondary/50 outline-none disabled:opacity-50"
+                    className="max-h-[200px] min-h-[2.75rem] w-full resize-none bg-transparent px-2 py-1.5 text-sm text-nebula-text placeholder:text-nebula-text-secondary/50 outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 disabled:opacity-50"
                 />
 
                 {/* Toolbar row -- "+" tools menu + model selector on the
@@ -193,7 +213,11 @@ export default function MessageInput({
                             disabled={disabled}
                         />
                         <div className="mx-0.5 h-5 w-px bg-nebula-border" />
-                        <ModelSelector />
+                        <ModelSelector
+                            models={models}
+                            selectedModel={selectedModel}
+                            onSelectModel={setSelectedModel}
+                        />
                     </div>
 
                     <button
@@ -202,7 +226,7 @@ export default function MessageInput({
                         title="Send (Shift+Enter)"
                         className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-nebula-purple to-nebula-pink text-white transition-all hover:brightness-110 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
                     >
-                        <Send className="h-4 w-4" />
+                        <ArrowUp className="h-4 w-4" />
                     </button>
                 </div>
             </div>

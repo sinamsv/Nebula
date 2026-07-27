@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { ShieldCheck, Check, X, Coins } from "lucide-react";
+import { ShieldCheck, Check, X, Bot } from "lucide-react";
 import GlassPanel from "@/components/GlassPanel";
 import Button from "@/components/Button";
 import TextField from "@/components/TextField";
 import Banner from "@/components/Banner";
 import { LoadingSpinner } from "@/components/ProtectedRoute";
 import { useAuth } from "@/lib/AuthContext";
-import { getPendingUsers, reviewUser, modifyUserCoins, updateUserRole, getRoleSettings, updateRoleSettings, ApiError } from "@/lib/api";
+import { getPendingUsers, reviewUser, lookupUserByUsername, updateUserRole, getRoleSettings, updateRoleSettings, getAdminModels, saveAdminModel, deleteAdminModel, ApiError } from "@/lib/api";
 import type { PendingUser } from "@/types/api";
 import { formatTimestamp } from "@/lib/utils";
 
@@ -41,7 +41,7 @@ export default function AdminPage() {
         {token ? <PendingUsersSection token={token} /> : null}
         {token ? <RoleManagementSection token={token} /> : null}
         {token ? <RoleSettingsSection token={token} /> : null}
-        {token ? <AddCoinsSection token={token} /> : null}
+        {token ? <ModelConfigurationSection token={token} /> : null}
       </div>
     </div>
   );
@@ -141,35 +141,244 @@ function PendingUsersSection({ token }: { token: string }) {
   );
 }
 
+function ModelConfigurationSection({ token }: { token: string }) {
+  const [models, setModels] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Form states for adding/editing a model
+  const [modelId, setModelId] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [allowedRoles, setAllowedRoles] = useState<string[]>(["Member", "Trusted", "Researcher", "Admin"]);
+
+  async function loadModels() {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await getAdminModels(token);
+      setModels(res.models);
+    } catch (err) {
+      setError("Couldn't load model configurations.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadModels();
+  }, []);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!modelId.trim() || !displayName.trim()) {
+      setError("Please fill in both Model ID and Display Name.");
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await saveAdminModel(token, {
+        model_id: modelId.trim(),
+        display_name: displayName.trim(),
+        allowed_roles: allowedRoles,
+      });
+      // Clear form
+      setModelId("");
+      setDisplayName("");
+      setAllowedRoles(["Member", "Trusted", "Researcher", "Admin"]);
+      await loadModels();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't save model configuration.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (!confirm(`Are you sure you want to delete model "${id}"?`)) return;
+    setError(null);
+    try {
+      await deleteAdminModel(token, id);
+      await loadModels();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't delete model.");
+    }
+  }
+
+  function toggleRole(role: string) {
+    setAllowedRoles((prev) =>
+      prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]
+    );
+  }
+
+  return (
+    <GlassPanel className="p-5" glow="none">
+      <div className="flex items-center gap-2">
+        <Bot className="h-4 w-4 text-nebula-purple" />
+        <h2 className="font-display text-sm font-semibold">AI Model Configurations</h2>
+      </div>
+      <p className="mt-1 text-xs text-nebula-text-secondary">
+        Manage AI models, display names, and role-based access.
+      </p>
+
+      {error ? (
+        <div className="mt-3">
+          <Banner variant="error">{error}</Banner>
+        </div>
+      ) : null}
+
+      <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3 border-b border-nebula-border pb-5">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <TextField
+            label="Model ID / string"
+            value={modelId}
+            onChange={(e) => setModelId(e.target.value)}
+            placeholder="e.g. google/gemini-2.5-pro"
+            required
+          />
+          <TextField
+            label="Custom Display Name"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="e.g. Gemini 2.5 Pro (High Quality)"
+            required
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-nebula-text-secondary">Available to Roles</label>
+          <div className="flex flex-wrap gap-4 mt-1">
+            {["Member", "Trusted", "Researcher", "Admin"].map((r) => (
+              <label key={r} className="flex items-center gap-2 cursor-pointer text-xs font-medium">
+                <input
+                  type="checkbox"
+                  checked={allowedRoles.includes(r)}
+                  onChange={() => toggleRole(r)}
+                  className="rounded border-nebula-border bg-white/[0.03] text-nebula-purple focus:ring-nebula-purple"
+                />
+                {r}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <Button type="submit" isLoading={isSubmitting} className="self-start mt-1">
+          Add / Update Model
+        </Button>
+      </form>
+
+      <div className="mt-4">
+        <h3 className="text-xs font-semibold text-nebula-text-secondary">Current Models</h3>
+        {isLoading ? (
+          <div className="flex justify-center py-4">
+            <LoadingSpinner />
+          </div>
+        ) : models.length === 0 ? (
+          <p className="mt-2 text-xs text-nebula-text-secondary">No models configured.</p>
+        ) : (
+          <div className="mt-2 flex flex-col gap-2">
+            {models.map((m) => (
+              <div
+                key={m.model_id}
+                className="flex items-center justify-between gap-3 rounded-xl border border-nebula-border bg-white/[0.01] px-3.5 py-2.5"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-medium text-nebula-text">{m.display_name}</p>
+                  <p className="truncate font-mono text-[10px] text-nebula-text-secondary/80">
+                    {m.model_id}
+                  </p>
+                  <p className="mt-1 text-[10px] text-nebula-text-secondary/60">
+                    Roles: {m.allowed_roles.join(", ")}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModelId(m.model_id);
+                      setDisplayName(m.display_name);
+                      setAllowedRoles(m.allowed_roles);
+                    }}
+                    className="text-xs text-nebula-purple hover:underline cursor-pointer"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(m.model_id)}
+                    className="text-xs text-red-400 hover:underline cursor-pointer"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </GlassPanel>
+  );
+}
+
 function RoleManagementSection({ token }: { token: string }) {
-  const [userId, setUserId] = useState("");
+  const { user: currentAdmin } = useAuth();
+  const [searchUsername, setSearchUsername] = useState("");
+  const [resolvedUser, setResolvedUser] = useState<any | null>(null);
+
   const [role, setRole] = useState<"Member" | "Trusted" | "Researcher" | "Admin">("Member");
   const [unlimitedMode, setUnlimitedMode] = useState<"none" | "temporary" | "permanent">("none");
   const [unlimitedDuration, setUnlimitedDuration] = useState<"1 day" | "1 week" | "1 month" | "indefinite">("1 day");
 
+  const [isSearching, setIsSearching] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
 
+  async function handleSearch(e: FormEvent) {
+    e.preventDefault();
+    if (!searchUsername.trim()) return;
+
+    setError(null);
+    setResult(null);
+    setResolvedUser(null);
+    setIsSearching(true);
+
+    try {
+      const user = await lookupUserByUsername(token, searchUsername.trim());
+      setResolvedUser(user);
+      setRole(user.role);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't find user by that username.");
+    } finally {
+      setIsSearching(false);
+    }
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!resolvedUser) return;
     setError(null);
     setResult(null);
 
-    const parsedUserId = Number(userId);
-    if (!Number.isInteger(parsedUserId) || parsedUserId <= 0) {
-      setError("Enter a valid Nebula user id (a whole number).");
-      return;
+    // Self-demotion safety warning check
+    if (resolvedUser.nebula_user_id === currentAdmin?.nebula_user_id && role !== "Admin") {
+      const confirmed = window.confirm(
+        "You are about to remove your own admin access. This cannot be undone by yourself. Are you sure?"
+      );
+      if (!confirmed) return;
     }
 
     setIsSubmitting(true);
     try {
-      const res = await updateUserRole(token, parsedUserId, {
+      await updateUserRole(token, resolvedUser.nebula_user_id, {
         role,
         unlimited_mode: unlimitedMode,
         unlimited_duration: unlimitedDuration,
       });
-      setResult(`Updated user #${parsedUserId} role to ${role}. Unlimited mode: ${unlimitedMode}.`);
+      setResult(`Updated user @${resolvedUser.username} role to ${role}. Unlimited mode: ${unlimitedMode}.`);
+      // Update local role
+      setResolvedUser({ ...resolvedUser, role });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't update that user's role.");
     } finally {
@@ -184,73 +393,95 @@ function RoleManagementSection({ token }: { token: string }) {
         <h2 className="font-display text-sm font-semibold">User Role & Researcher Settings</h2>
       </div>
       <p className="mt-1 text-xs text-nebula-text-secondary">
-        Manage user roles. For Researchers, you can also configure individual unlimited coin settings.
+        Manage user roles. Look up the user by username instead of typing a raw ID.
       </p>
 
-      <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3">
-        <TextField
-          label="Nebula user id"
-          value={userId}
-          onChange={(e) => setUserId(e.target.value)}
-          placeholder="e.g. 4"
-          inputMode="numeric"
-          required
-        />
+      {/* Lookup Form */}
+      <form onSubmit={handleSearch} className="mt-4 flex items-end gap-3">
+        <div className="flex-1">
+          <TextField
+            label="Search by username"
+            value={searchUsername}
+            onChange={(e) => setSearchUsername(e.target.value)}
+            placeholder="e.g. sina"
+            required
+          />
+        </div>
+        <Button type="submit" isLoading={isSearching} className="h-[46px]">
+          Lookup User
+        </Button>
+      </form>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-nebula-text-secondary">Role</label>
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value as any)}
-              className="rounded-xl border border-nebula-border bg-white/[0.03] px-3.5 py-2.5 text-sm text-nebula-text outline-none focus:border-nebula-purple/60 focus:ring-2 focus:ring-nebula-purple/20"
-            >
-              <option value="Member">Member</option>
-              <option value="Trusted">Trusted</option>
-              <option value="Researcher">Researcher</option>
-              <option value="Admin">Admin</option>
-            </select>
+      {error ? <div className="mt-3"><Banner variant="error">{error}</Banner></div> : null}
+      {result ? <div className="mt-3"><Banner variant="info">{result}</Banner></div> : null}
+
+      {resolvedUser && (
+        <form onSubmit={handleSubmit} className="mt-5 flex flex-col gap-3 border-t border-nebula-border pt-4">
+          <div className="rounded-xl border border-nebula-border bg-white/[0.02] px-4 py-3 text-xs">
+            <p className="font-semibold text-white">Target User Found:</p>
+            <p className="mt-1 text-nebula-text-secondary">
+              Display Name: <span className="text-white font-medium">{resolvedUser.display_name}</span>
+            </p>
+            <p className="text-nebula-text-secondary">
+              Username: <span className="text-white font-medium">@{resolvedUser.username}</span>
+            </p>
+            <p className="text-nebula-text-secondary">
+              Current Role: <span className="text-nebula-purple font-semibold">{resolvedUser.role}</span>
+            </p>
           </div>
 
-          {role === "Researcher" && (
+          <div className="grid grid-cols-2 gap-3 mt-1">
             <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-nebula-text-secondary">Unlimited Coins Mode</label>
+              <label className="text-sm font-medium text-nebula-text-secondary">Role</label>
               <select
-                value={unlimitedMode}
-                onChange={(e) => setUnlimitedMode(e.target.value as any)}
+                value={role}
+                onChange={(e) => setRole(e.target.value as any)}
                 className="rounded-xl border border-nebula-border bg-white/[0.03] px-3.5 py-2.5 text-sm text-nebula-text outline-none focus:border-nebula-purple/60 focus:ring-2 focus:ring-nebula-purple/20"
               >
-                <option value="none">None (Standard Limits)</option>
-                <option value="temporary">Temporary</option>
-                <option value="permanent">Permanent</option>
+                <option value="Member">Member</option>
+                <option value="Trusted">Trusted</option>
+                <option value="Researcher">Researcher</option>
+                <option value="Admin">Admin</option>
+              </select>
+            </div>
+
+            {role === "Researcher" && (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-nebula-text-secondary">Unlimited Coins Mode</label>
+                <select
+                  value={unlimitedMode}
+                  onChange={(e) => setUnlimitedMode(e.target.value as any)}
+                  className="rounded-xl border border-nebula-border bg-white/[0.03] px-3.5 py-2.5 text-sm text-nebula-text outline-none focus:border-nebula-purple/60 focus:ring-2 focus:ring-nebula-purple/20"
+                >
+                  <option value="none">None (Standard Limits)</option>
+                  <option value="temporary">Temporary</option>
+                  <option value="permanent">Permanent</option>
+                </select>
+              </div>
+            )}
+          </div>
+
+          {role === "Researcher" && unlimitedMode === "temporary" && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-nebula-text-secondary">Duration</label>
+              <select
+                value={unlimitedDuration}
+                onChange={(e) => setUnlimitedDuration(e.target.value as any)}
+                className="rounded-xl border border-nebula-border bg-white/[0.03] px-3.5 py-2.5 text-sm text-nebula-text outline-none focus:border-nebula-purple/60 focus:ring-2 focus:ring-nebula-purple/20"
+              >
+                <option value="1 day">1 Day</option>
+                <option value="1 week">1 Week</option>
+                <option value="1 month">1 Month</option>
+                <option value="indefinite">Indefinite</option>
               </select>
             </div>
           )}
-        </div>
 
-        {role === "Researcher" && unlimitedMode === "temporary" && (
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-nebula-text-secondary">Duration</label>
-            <select
-              value={unlimitedDuration}
-              onChange={(e) => setUnlimitedDuration(e.target.value as any)}
-              className="rounded-xl border border-nebula-border bg-white/[0.03] px-3.5 py-2.5 text-sm text-nebula-text outline-none focus:border-nebula-purple/60 focus:ring-2 focus:ring-nebula-purple/20"
-            >
-              <option value="1 day">1 Day</option>
-              <option value="1 week">1 Week</option>
-              <option value="1 month">1 Month</option>
-              <option value="indefinite">Indefinite</option>
-            </select>
-          </div>
-        )}
-
-        {error ? <Banner variant="error">{error}</Banner> : null}
-        {result ? <Banner variant="info">{result}</Banner> : null}
-
-        <Button type="submit" isLoading={isSubmitting} className="mt-1 self-start">
-          Update Role & Settings
-        </Button>
-      </form>
+          <Button type="submit" isLoading={isSubmitting} className="mt-2 self-start">
+            Update Role & Settings
+          </Button>
+        </form>
+      )}
     </GlassPanel>
   );
 }
@@ -428,90 +659,3 @@ function RoleSettingsSection({ token }: { token: string }) {
 }
 
 
-function AddCoinsSection({ token }: { token: string }) {
-  const [userId, setUserId] = useState("");
-  const [amount, setAmount] = useState("");
-  const [mode, setMode] = useState<"add" | "set">("add");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<string | null>(null);
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setResult(null);
-
-    const parsedUserId = Number(userId);
-    const parsedAmount = Number(amount);
-    if (!Number.isInteger(parsedUserId) || parsedUserId <= 0) {
-      setError("Enter a valid Nebula user id (a whole number).");
-      return;
-    }
-    if (!Number.isInteger(parsedAmount)) {
-      setError("Enter a valid whole-number amount.");
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const res = await modifyUserCoins(token, parsedUserId, { amount: parsedAmount, mode });
-      setResult(`New balance for user #${res.nebula_user_id}: ${res.new_balance} coins.`);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't update that user's coins.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  return (
-    <GlassPanel className="p-5" glow="none">
-      <div className="flex items-center gap-2">
-        <Coins className="h-4 w-4 text-nebula-pink" />
-        <h2 className="font-display text-sm font-semibold">Add / set coins</h2>
-      </div>
-      <p className="mt-1 text-xs text-nebula-text-secondary">
-        You&apos;ll need the target account&apos;s Nebula user id (visible to admins via other tools, e.g. Discord&apos;s
-        activity check).
-      </p>
-
-      <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3">
-        <TextField
-          label="Nebula user id"
-          value={userId}
-          onChange={(e) => setUserId(e.target.value)}
-          placeholder="e.g. 4"
-          inputMode="numeric"
-          required
-        />
-        <div className="grid grid-cols-2 gap-3">
-          <TextField
-            label="Amount"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="e.g. 10"
-            inputMode="numeric"
-            required
-          />
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-nebula-text-secondary">Mode</label>
-            <select
-              value={mode}
-              onChange={(e) => setMode(e.target.value as "add" | "set")}
-              className="rounded-xl border border-nebula-border bg-white/[0.03] px-3.5 py-2.5 text-sm text-nebula-text outline-none focus:border-nebula-purple/60 focus:ring-2 focus:ring-nebula-purple/20"
-            >
-              <option value="add">Add</option>
-              <option value="set">Set</option>
-            </select>
-          </div>
-        </div>
-
-        {error ? <Banner variant="error">{error}</Banner> : null}
-        {result ? <Banner variant="info">{result}</Banner> : null}
-
-        <Button type="submit" isLoading={isSubmitting} className="mt-1 self-start">
-          Update balance
-        </Button>
-      </form>
-    </GlassPanel>
-  );
-}

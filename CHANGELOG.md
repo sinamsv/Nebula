@@ -2,6 +2,22 @@
 
 All notable changes to Nebula will be documented in this file.
 
+## [1.7.0] - 2026-07-22
+
+### Added
+- **Admin-Editable AI Model Configuration**: Replaced static `.env`-based model parameters with an admin-editable database configuration managed directly from the admin panel. Admins can register custom model IDs, set display names, and gate available roles.
+- **Playground Model Switcher**: Wired the visual model switcher in the chat Playground page to dynamically fetch available models from the new API, gated by the user's role, and thread the selected model dynamically on messaging.
+- **Usage Limits Page**: Created a beautiful, user-accessible "Usage Limits" page displaying continuous rolling-window daily and weekly rate-limit statistics, color-gradient progress bars, and countdown reset times. Integrated the new page into the main Dashboard sidebar with an `Activity` icon.
+
+### Changed
+- **Version Release Bump**: Upgraded FastAPI backend API definitions and main application setups to launch version `1.7.0`.
+
+### Fixed
+- **Remove Legacy Coin Add/Set Feature**: Removed the legacy coin modify sections from the admin panel UI, deleted `modifyUserCoins` API calls and types, and removed the backend `POST /users/{user_id}/coins` route and matching schemas.
+- **Fix Admin Self-Demotion Vulnerability**: Replaced the direct numeric user ID input in Role settings with a secure username-based lookup card. Enforced robust backend and frontend blocks preventing self-demotion if only one admin account exists, and added clear confirmation warnings if other admins are registered.
+- **Redesign Send Button**: Swapped the messenger-style send icon in `MessageInput.tsx` for a circular upward arrow (`ArrowUp`), matching ChatGPT/Gemini/Claude design aesthetics.
+- **Fix Message Input Box UX issues**: Softened the distracting text outline ring on focus in favor of a subtle capsule border (`focus-within:border-nebula-purple/40`). Resolved mobile keyboard overlay layout issues by using a dynamic `visualViewport` height state listener.
+
 ## [1.6.0] - 2026-07-20
 
 ### Added

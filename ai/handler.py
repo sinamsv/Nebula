@@ -293,7 +293,14 @@ class AIHandler:
     def _construct_provider(self, resolved: _ResolvedProviderConfig, config: Dict) -> BaseProvider:
         ai_model = os.getenv('AI_MODEL')
         if not ai_model:
-            raise _ProviderConfigError("AI_MODEL is not set.")
+            try:
+                db_models = self.db.get_all_models()
+                if db_models:
+                    ai_model = db_models[0]['model_id']
+                else:
+                    ai_model = 'google/gemini-3.1-flash-lite'
+            except Exception:
+                ai_model = 'google/gemini-3.1-flash-lite'
 
         base_url = resolved.base_url_override or config.get('base_url')
         temperature = config.get('temperature', 0.7)
@@ -507,23 +514,25 @@ class AIHandler:
 
         role_settings = self.db.get_role_settings(role)
         allowed_tools = role_settings['allowed_tools'] if role_settings else ["search"]
-        allowed_models = role_settings['allowed_models'] if role_settings else ["google/gemini-3.1-flash-lite"]
 
-        # 1. Gate AI Model
-        raw_ai_models = os.getenv('AI_MODEL', '')
-        env_models = [m.strip() for m in raw_ai_models.split(',')] if raw_ai_models else []
+        # 1. Gate AI Model from DB config
+        all_models = self.db.get_all_models()
+        user_available_models = [m for m in all_models if (role == 'Admin' or role in m['allowed_roles'])]
 
         chosen_model = model
         if not chosen_model:
-            chosen_model = env_models[0] if env_models else None
-
-        if chosen_model:
-            # If the specific model is not in the list of models configured by the admin, block
-            if env_models and chosen_model not in env_models:
+            if user_available_models:
+                chosen_model = user_available_models[0]['model_id']
+            elif all_models:
+                chosen_model = all_models[0]['model_id']
+            else:
+                chosen_model = 'google/gemini-3.1-flash-lite'
+        else:
+            model_entry = next((m for m in all_models if m['model_id'] == chosen_model), None)
+            if not model_entry:
                 result.blocked_reason = f"❌ Model '{chosen_model}' is not configured in this deployment."
                 return result
-            # If user doesn't have permission for this model, block
-            if role != 'Admin' and chosen_model not in allowed_models:
+            if role != 'Admin' and role not in model_entry['allowed_roles']:
                 result.blocked_reason = f"❌ Your role '{role}' is not permitted to use model '{chosen_model}'."
                 return result
 

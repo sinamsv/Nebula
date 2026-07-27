@@ -248,14 +248,13 @@ def test_coins_self_only():
     assert r.status_code == 200
     assert r.json()["balance"] == 50
 
-    # admin can modify another user's coins via the id-based endpoint
+    # admin can no longer modify another user's coins via the id-based endpoint since it was removed
     nebula_user_id = client.post("/api/v1/auth/signup", json={
         "username": "target_user", "password": "supersecret123",
     }).json()["nebula_user_id"]
 
     r = client.post(f"/api/v1/users/{nebula_user_id}/coins", json={"amount": 5, "mode": "add"}, headers=admin_headers)
-    assert r.status_code == 200
-    assert r.json()["new_balance"] == 50
+    assert r.status_code == 404
 
     print("PASS: test_coins_self_only")
 
