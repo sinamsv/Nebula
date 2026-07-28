@@ -476,6 +476,8 @@ class AIHandler:
         images: Optional[List[ImageAttachment]] = None,
         search_mode: str = "smart",
         model: Optional[str] = None,
+        project_id: Optional[str] = None,
+        project_chat_id: Optional[str] = None,
     ) -> TurnResult:
         result = TurnResult()
 
@@ -494,15 +496,56 @@ class AIHandler:
             return result
 
         nebula_user_id = identity['nebula_user_id']
+        username = identity['username']
 
-        if self.memory.is_full(nebula_user_id, chat_id=chat_id):
-            if chat_id is not None:
-                chat = self.db.get_chat(chat_id)
-                chat_title = chat['title'] if chat else "this chat"
-                result.blocked_reason = self.memory.full_chat_memory_message(display_name, chat_title)
-            else:
-                result.blocked_reason = self.memory.full_memory_message(display_name)
-            return result
+        # Project context loading
+        project_instruction = None
+        project_knowledge = None
+        if project_id:
+            from web_backend.project_store import ProjectStore
+            store = ProjectStore()
+            try:
+                # Verifies existence and ownership
+                store.get_project_metadata(username, project_id)
+                project_instruction = store.read_instruction(username, project_id)
+                project_knowledge_dict = store.read_knowledge_files_contents(username, project_id)
+                if project_knowledge_dict:
+                    project_knowledge = "\n\n## Project Uploaded Files (Knowledge Base)\n"
+                    for filename, content in project_knowledge_dict.items():
+                        project_knowledge += f"\n### File: {filename}\n"
+                        project_knowledge += f"```\n{content}\n```\n"
+            except Exception as e:
+                result.blocked_reason = f"❌ Project access error: {str(e)}"
+                return result
+
+        if project_id and project_chat_id:
+            try:
+                chat_data = store.get_chat(username, project_id, project_chat_id)
+                conversation_history = [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in chat_data.get("messages", [])
+                ]
+            except Exception as e:
+                result.blocked_reason = f"❌ Project chat loading error: {str(e)}"
+                return result
+        else:
+            conversation_history = self.memory.get_conversation_context(nebula_user_id, chat_id=chat_id)
+
+        if project_id and project_chat_id:
+            history_text = "".join(m["content"] for m in conversation_history)
+            total_tokens = self.memory.count_tokens(history_text)
+            if total_tokens >= self.memory.MAX_TOKENS:
+                result.blocked_reason = self.memory.full_chat_memory_message(display_name, chat_data.get("title", "Project Chat"))
+                return result
+        else:
+            if self.memory.is_full(nebula_user_id, chat_id=chat_id):
+                if chat_id is not None:
+                    chat = self.db.get_chat(chat_id)
+                    chat_title = chat['title'] if chat else "this chat"
+                    result.blocked_reason = self.memory.full_chat_memory_message(display_name, chat_title)
+                else:
+                    result.blocked_reason = self.memory.full_memory_message(display_name)
+                return result
 
         # Load user's role settings for model/tool gating and rate-limiting
         if self.coin_manager:
@@ -536,7 +579,6 @@ class AIHandler:
                 result.blocked_reason = f"❌ Your role '{role}' is not permitted to use model '{chosen_model}'."
                 return result
 
-        conversation_history = self.memory.get_conversation_context(nebula_user_id, chat_id=chat_id)
         is_admin = identity['is_admin']
         supports_guild_moderation = discord_guild is not None
 
@@ -545,8 +587,12 @@ class AIHandler:
 
         # Calculate exact exact-fraction projected input cost upfront
         turn_system_prompt = self.system_prompt
+        if project_instruction:
+            turn_system_prompt += f"\n\n## Project Specific Instructions\n{project_instruction}"
+        if project_knowledge:
+            turn_system_prompt += project_knowledge
         if search_mode == "on":
-            turn_system_prompt = self.system_prompt + _SEARCH_ON_INSTRUCTION
+            turn_system_prompt = turn_system_prompt + _SEARCH_ON_INSTRUCTION
 
         # 2. Gate rate limits
         if self.coin_manager:
@@ -568,9 +614,23 @@ class AIHandler:
             result.blocked_reason = self.user_facing_unconfigured_message()
             return result
 
-        usage_after_user_msg = await self.memory.add_message_to_memory(
-            nebula_user_id, "user", message_text, source_platform, chat_id=chat_id
-        )
+        if project_id and project_chat_id:
+            user_msg_tokens = self.memory.count_tokens(message_text)
+            chat_data = store.append_chat_message(username, project_id, project_chat_id, "user", message_text, token_count=user_msg_tokens)
+
+            total_tokens = sum(m.get('token_count', 0) for m in chat_data["messages"])
+            percentage = (total_tokens / self.memory.MAX_TOKENS) * 100 if self.memory.MAX_TOKENS else 0
+            usage_after_user_msg = {
+                'total_tokens': total_tokens,
+                'max_tokens': self.memory.MAX_TOKENS,
+                'percentage': round(percentage, 2),
+                'remaining': max(0, self.memory.MAX_TOKENS - total_tokens),
+                'is_full': total_tokens >= self.memory.MAX_TOKENS,
+            }
+        else:
+            usage_after_user_msg = await self.memory.add_message_to_memory(
+                nebula_user_id, "user", message_text, source_platform, chat_id=chat_id
+            )
 
         final_content = None
         tools = self.get_available_tools(is_admin, supports_guild_moderation, search_mode=search_mode, allowed_tools=allowed_tools)
@@ -612,9 +672,13 @@ class AIHandler:
 
         if final_content:
             result.reply_text = final_content
-            await self.memory.add_message_to_memory(
-                nebula_user_id, "assistant", final_content, source_platform, chat_id=chat_id
-            )
+            if project_id and project_chat_id:
+                assistant_tokens = self.memory.count_tokens(final_content)
+                store.append_chat_message(username, project_id, project_chat_id, "assistant", final_content, token_count=assistant_tokens)
+            else:
+                await self.memory.add_message_to_memory(
+                    nebula_user_id, "assistant", final_content, source_platform, chat_id=chat_id
+                )
             # Log exact exact-fraction output cost
             if self.coin_manager:
                 output_tokens = self.memory.count_tokens(final_content)

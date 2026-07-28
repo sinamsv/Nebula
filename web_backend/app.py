@@ -30,7 +30,7 @@ from core.database import DatabaseManager
 from core.memory import MemoryManager
 from ai.handler import AIHandler
 
-from web_backend.routes import admin, auth as auth_routes, chat, coins, sync
+from web_backend.routes import admin, auth as auth_routes, chat, coins, sync, projects
 
 
 def create_app(
@@ -78,6 +78,7 @@ def create_app(
     app.include_router(coins.router)
     app.include_router(sync.router)
     app.include_router(admin.router)
+    app.include_router(projects.router)
 
     @app.get("/api/v1/health")
     async def health():
