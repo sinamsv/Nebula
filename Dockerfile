@@ -47,7 +47,7 @@ WORKDIR /build/web_frontend
 # changed, not dependencies -- same reasoning as copying
 # requirements.txt before the rest of the backend source above.
 COPY web_frontend/package.json web_frontend/package-lock.json* ./
-RUN npm install
+RUN npm install --legacy-peer-deps
 
 COPY web_frontend/ ./
 # NEXT_PUBLIC_* variables are baked into the compiled JavaScript at
