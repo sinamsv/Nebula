@@ -560,6 +560,9 @@ class AIHandler:
 
         # 1. Gate AI Model from DB config
         all_models = self.db.get_all_models()
+        if not all_models:
+            result.blocked_reason = "❌ No AI models are configured in this deployment. Please contact a Nebula admin."
+            return result
         user_available_models = [m for m in all_models if (role == 'Admin' or role in m['allowed_roles'])]
 
         chosen_model = model
@@ -773,6 +776,9 @@ class AIHandler:
         allowed_tools = role_settings['allowed_tools'] if role_settings else ["search"]
 
         all_models = self.db.get_all_models()
+        if not all_models:
+            yield {"type": "error", "error": "❌ No AI models are configured in this deployment. Please contact a Nebula admin."}
+            return
         user_available_models = [m for m in all_models if (role == 'Admin' or role in m['allowed_roles'])]
 
         chosen_model = model

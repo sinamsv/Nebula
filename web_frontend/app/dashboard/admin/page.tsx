@@ -613,14 +613,6 @@ function RoleSettingsSection({ token }: { token: string }) {
                 />
               </div>
 
-              <TextField
-                label="Allowed Models (comma-separated)"
-                value={allowedModels}
-                onChange={(e) => setAllowedModels(e.target.value)}
-                placeholder="e.g. google/gemini-3.1-flash-lite, google/gemini-2.5-pro"
-                required
-              />
-
               <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-medium text-nebula-text-secondary">Allowed Tools</label>
                 <div className="flex gap-4 mt-1">

@@ -11,7 +11,7 @@ const config: Config = {
       colors: {
         "nebula-bg": "var(--bg-main)",
         "nebula-bg-secondary": "var(--bg-secondary)",
-        "nebula-surface": "var(--bg-surface)",
+        "nebula-surface": "rgb(var(--bg-surface-rgb) / <alpha-value>)",
         "nebula-surface-hover": "var(--bg-surface-hover)",
         "nebula-pink": "var(--accent-pink)",
         "nebula-purple": "var(--accent-purple)",

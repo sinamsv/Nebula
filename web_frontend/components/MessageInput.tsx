@@ -43,7 +43,7 @@ export default function MessageInput({
     disabled,
     variant = "docked",
 }: MessageInputProps) {
-    const { token } = useAuth();
+    const { token, user } = useAuth();
     const [text, setText] = useState("");
     const [searchMode, setSearchMode] = useState<SearchMode>("smart");
     const [attachedImage, setAttachedImage] = useState<File | null>(null);
@@ -54,9 +54,11 @@ export default function MessageInput({
 
     const [models, setModels] = useState<AvailableModelItem[]>([]);
     const [selectedModel, setSelectedModel] = useState<AvailableModelItem | null>(null);
+    const [isLoadingModels, setIsLoadingModels] = useState(true);
 
     useEffect(() => {
         if (!token) return;
+        setIsLoadingModels(true);
         getAvailableModels(token)
             .then((res) => {
                 setModels(res.models);
@@ -66,6 +68,9 @@ export default function MessageInput({
             })
             .catch(() => {
                 // Ignore or fallback
+            })
+            .finally(() => {
+                setIsLoadingModels(false);
             });
     }, [token]);
 
@@ -131,7 +136,7 @@ export default function MessageInput({
     }
 
     const canSend =
-        !disabled && (text.trim().length > 0 || attachedImage !== null);
+        !disabled && models.length > 0 && (text.trim().length > 0 || attachedImage !== null);
 
     return (
         <div className="w-full">
@@ -176,24 +181,44 @@ export default function MessageInput({
                 ) : null}
 
                 {/* Text row */}
-                <textarea
-                    ref={textareaRef}
-                    value={text}
-                    onChange={(e) => {
-                        setText(e.target.value);
-                        autoGrow();
-                    }}
-                    onKeyDown={handleKeyDown}
-                    disabled={disabled}
-                    rows={1}
-                    dir="auto"
-                    placeholder={
-                        attachedImage
-                            ? "Add a caption (optional)..."
-                            : "Message Nebula..."
-                    }
-                    className="max-h-[200px] min-h-[2.75rem] w-full resize-none bg-transparent px-2 py-1.5 text-sm text-nebula-text placeholder:text-nebula-text-secondary/50 outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 disabled:opacity-50"
-                />
+                {!isLoadingModels && models.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-4 px-2 text-center text-sm text-nebula-text-secondary">
+                        <p className="font-semibold text-nebula-text mb-1">No AI model is configured yet.</p>
+                        {user?.is_admin ? (
+                            <p>
+                                Go to the{" "}
+                                <a
+                                    href="/dashboard/admin"
+                                    className="text-nebula-purple hover:underline font-semibold"
+                                >
+                                    Admin Panel
+                                </a>{" "}
+                                to add one.
+                            </p>
+                        ) : (
+                            <p>Please contact a Nebula admin.</p>
+                        )}
+                    </div>
+                ) : (
+                    <textarea
+                        ref={textareaRef}
+                        value={text}
+                        onChange={(e) => {
+                            setText(e.target.value);
+                            autoGrow();
+                        }}
+                        onKeyDown={handleKeyDown}
+                        disabled={disabled}
+                        rows={1}
+                        dir="auto"
+                        placeholder={
+                            attachedImage
+                                ? "Add a caption (optional)..."
+                                : "Message Nebula..."
+                        }
+                        className="max-h-[200px] min-h-[2.75rem] w-full resize-none bg-transparent px-2 py-1.5 text-sm text-nebula-text placeholder:text-nebula-text-secondary/50 outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 disabled:opacity-50"
+                    />
+                )}
 
                 {/* Toolbar row -- "+" tools menu + model selector on the
                     left, send on the right */}
@@ -210,14 +235,18 @@ export default function MessageInput({
                             onPickImage={() => fileInputRef.current?.click()}
                             searchMode={searchMode}
                             onSearchModeChange={setSearchMode}
-                            disabled={disabled}
+                            disabled={disabled || models.length === 0}
                         />
-                        <div className="mx-0.5 h-5 w-px bg-nebula-border" />
-                        <ModelSelector
-                            models={models}
-                            selectedModel={selectedModel}
-                            onSelectModel={setSelectedModel}
-                        />
+                        {models.length > 0 ? (
+                            <>
+                                <div className="mx-0.5 h-5 w-px bg-nebula-border" />
+                                <ModelSelector
+                                    models={models}
+                                    selectedModel={selectedModel}
+                                    onSelectModel={setSelectedModel}
+                                />
+                            </>
+                        ) : null}
                     </div>
 
                     <button

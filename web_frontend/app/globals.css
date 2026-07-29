@@ -13,6 +13,7 @@
   --bg-main: #09090B;
   --bg-secondary: #111217;
   --bg-surface: #0D0E13;
+  --bg-surface-rgb: 13, 14, 19;
   --bg-surface-hover: #15161D;
   --text-main: #F5F5F5;
   --text-secondary: #9A9AA5;
@@ -29,6 +30,7 @@
   --bg-main: #09090B;
   --bg-secondary: #111217;
   --bg-surface: #0D0E13;
+  --bg-surface-rgb: 13, 14, 19;
   --bg-surface-hover: #15161D;
   --text-main: #F5F5F5;
   --text-secondary: #9A9AA5;
@@ -45,6 +47,7 @@
   --bg-main: #0B0B0C;
   --bg-secondary: #121214;
   --bg-surface: #18181C;
+  --bg-surface-rgb: 24, 24, 28;
   --bg-surface-hover: #222227;
   --text-main: #ECECF1;
   --text-secondary: #C5C5D2;
@@ -61,6 +64,7 @@
   --bg-main: #FFFFFF;
   --bg-secondary: #F7F7F8;
   --bg-surface: #ECECF1;
+  --bg-surface-rgb: 236, 236, 241;
   --bg-surface-hover: #D9D9E3;
   --text-main: #1E1E1E;
   --text-secondary: #4A4A5A;
@@ -87,13 +91,9 @@ body {
 
 /* Hide drifting nebula background blobs when not on Nebula theme */
 .theme-dark .bg-nebula-glow,
-.theme-dark [class*="bg-nebula-purple"],
-.theme-dark [class*="bg-nebula-blue"],
-.theme-dark [class*="bg-nebula-pink"],
+.theme-dark .nebula-blob,
 .theme-light .bg-nebula-glow,
-.theme-light [class*="bg-nebula-purple"],
-.theme-light [class*="bg-nebula-blue"],
-.theme-light [class*="bg-nebula-pink"] {
+.theme-light .nebula-blob {
   display: none !important;
 }
 
