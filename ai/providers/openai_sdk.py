@@ -25,7 +25,7 @@ does it. See _attach_images_to_last_message() below.
 """
 import base64
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from openai import AsyncOpenAI
 
@@ -94,6 +94,66 @@ class OpenAISDKProvider(BaseProvider):
             tool_calls=normalized_tool_calls,
             raw=message,
         )
+
+    async def call_stream(self, messages: List[Dict], tools: List[Dict],
+                          system_prompt: str,
+                          images: Optional[List[ImageAttachment]] = None,
+                          model_override: Optional[str] = None) -> AsyncGenerator[Dict[str, Any], None]:
+        full_messages = [{"role": "system", "content": system_prompt}] + list(messages)
+
+        if images:
+            full_messages[-1] = self._attach_images_to_message(full_messages[-1], images)
+
+        kwargs: Dict[str, Any] = {
+            "model": model_override or self.model,
+            "messages": full_messages,
+            "tools": tools if tools else None,
+            "tool_choice": "auto" if tools else None,
+            "temperature": self.temperature,
+            "max_tokens": 2000,
+            "stream": True,
+        }
+        if self.thinking_level:
+            kwargs["reasoning_effort"] = self.thinking_level
+
+        response_stream = await self.client.chat.completions.create(**kwargs)
+
+        tool_calls_deltas = {}
+        async for chunk in response_stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+
+            if delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in tool_calls_deltas:
+                        tool_calls_deltas[idx] = {
+                            "id": tc_delta.id or "",
+                            "name": tc_delta.function.name or "",
+                            "arguments": ""
+                        }
+                    else:
+                        if tc_delta.id:
+                            tool_calls_deltas[idx]["id"] += tc_delta.id
+                        if tc_delta.function and tc_delta.function.name:
+                            tool_calls_deltas[idx]["name"] += tc_delta.function.name
+                    if tc_delta.function and tc_delta.function.arguments:
+                        tool_calls_deltas[idx]["arguments"] += tc_delta.function.arguments
+
+            if delta.content:
+                yield {"type": "content", "content": delta.content}
+
+        if tool_calls_deltas:
+            normalized_tool_calls = []
+            for idx in sorted(tool_calls_deltas.keys()):
+                tc = tool_calls_deltas[idx]
+                normalized_tool_calls.append(NormalizedToolCall(
+                    id=tc["id"],
+                    name=tc["name"],
+                    arguments=json.loads(tc["arguments"]) if tc["arguments"] else {},
+                ))
+            yield {"type": "tool_calls", "tool_calls": normalized_tool_calls}
 
     @staticmethod
     def _attach_images_to_message(message: Dict, images: List[ImageAttachment]) -> Dict:

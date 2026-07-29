@@ -23,6 +23,7 @@ export interface SignupResponse {
   became_admin: boolean;
   access_token: string;
   token_type: string;
+  welcome_seen?: boolean;
 }
 
 export interface LoginRequest {
@@ -37,6 +38,7 @@ export interface LoginResponse {
   is_admin: boolean;
   access_token: string;
   token_type: string;
+  welcome_seen?: boolean;
 }
 
 export interface BootstrapStatusResponse {
@@ -63,6 +65,7 @@ export interface ChatMessage {
   content: string;
   source_platform: string;
   timestamp: string;
+  isStreaming?: boolean;
 }
 
 export interface ChatHistoryResponse {
@@ -266,4 +269,5 @@ export interface AuthUser {
   display_name: string;
   is_approved: boolean;
   is_admin: boolean;
+  welcome_seen?: boolean;
 }

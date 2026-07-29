@@ -16,6 +16,7 @@ import {
   LogOut,
   X,
   Activity,
+  Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ReactNode } from "react";
@@ -28,13 +29,14 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard/playground", label: "Playground", icon: <Sparkles className="h-4 w-4" /> },
+  { href: "/dashboard/playground", label: "Chat", icon: <Sparkles className="h-4 w-4" /> },
   { href: "/dashboard/platforms", label: "Platforms", icon: <Radio className="h-4 w-4" /> },
   { href: "/dashboard/usage", label: "Usage Limits", icon: <Activity className="h-4 w-4" /> },
   { href: "/dashboard/docs", label: "Docs", icon: <BookOpen className="h-4 w-4" /> },
   { href: "/dashboard/projects", label: "Projects", icon: <FolderKanban className="h-4 w-4" />, comingSoon: true },
   { href: "/dashboard/tools", label: "Tools", icon: <Wrench className="h-4 w-4" />, comingSoon: true },
   { href: "/dashboard/api-key", label: "API key", icon: <KeyRound className="h-4 w-4" />, comingSoon: true },
+  { href: "/dashboard/settings", label: "Settings", icon: <Settings className="h-4 w-4" /> },
 ];
 
 interface DashboardSidebarProps {

@@ -19,14 +19,13 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
         {isUser ? <User className="h-3.5 w-3.5 text-nebula-text-secondary" /> : <Bot className="h-3.5 w-3.5 text-white" />}
       </div>
 
-      <div className={cn("flex max-w-[85%] flex-col gap-1", isUser ? "items-end" : "items-start")}>
+      <div className={cn(isUser ? "flex max-w-[85%] flex-col gap-1 items-end" : "flex flex-1 flex-col gap-1 items-start min-w-0")}>
         <div
           className={cn(
-            "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
+            "text-sm leading-relaxed",
             isUser
-              ? "bg-gradient-to-br from-nebula-purple/25 to-nebula-pink/20 text-nebula-text"
-              : "border border-nebula-border bg-white/[0.03] text-nebula-text",
-            !isUser && "w-full"
+              ? "rounded-2xl px-4 py-2.5 bg-gradient-to-br from-nebula-purple/25 to-nebula-pink/20 text-nebula-text"
+              : "text-nebula-text w-full py-1"
           )}
         >
           {isUser ? (
@@ -34,7 +33,7 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
               {message.content}
             </p>
           ) : (
-            <div dir="auto" className="markdown-body">
+            <div dir="auto" className="markdown-body relative">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
@@ -61,6 +60,9 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
               >
                 {message.content}
               </ReactMarkdown>
+              {message.isStreaming && (
+                <span className="inline-block h-3.5 w-1.5 animate-pulse bg-current ml-1" style={{ animationDuration: '0.8s', verticalAlign: 'middle' }} />
+              )}
             </div>
           )}
         </div>

@@ -74,7 +74,7 @@ translation-on-every-call design made that the more natural insertion
 point here, versus the other two providers where messages are already
 dicts that can be shallow-patched directly).
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from google import genai
 from google.genai import types as genai_types
@@ -144,6 +144,49 @@ class GoogleSDKProvider(BaseProvider):
             tool_calls=normalized_tool_calls,
             raw=response,
         )
+
+    async def call_stream(self, messages: List[Dict], tools: List[Dict],
+                          system_prompt: str,
+                          images: Optional[List[ImageAttachment]] = None,
+                          model_override: Optional[str] = None) -> AsyncGenerator[Dict[str, Any], None]:
+        contents = self._to_genai_contents(messages, images=images)
+        genai_tools = self._to_genai_tools(tools) if tools else None
+
+        config_kwargs: Dict[str, Any] = {
+            "system_instruction": system_prompt,
+            "temperature": self.temperature,
+            "max_output_tokens": 2000,
+        }
+        if genai_tools:
+            config_kwargs["tools"] = genai_tools
+        if self.thinking_level:
+            config_kwargs["thinking_config"] = genai_types.ThinkingConfig(
+                thinking_level=self.thinking_level
+            )
+
+        response_stream = await self.client.aio.models.generate_content_stream(
+            model=model_override or self.model,
+            contents=contents,
+            config=genai_types.GenerateContentConfig(**config_kwargs),
+        )
+
+        function_calls = []
+        async for chunk in response_stream:
+            if chunk.text:
+                yield {"type": "content", "content": chunk.text}
+            if chunk.function_calls:
+                function_calls.extend(chunk.function_calls)
+
+        if function_calls:
+            normalized_tool_calls = []
+            for i, fc in enumerate(function_calls):
+                call_id = fc.id or f"google_call_{i}_{fc.name}"
+                normalized_tool_calls.append(NormalizedToolCall(
+                    id=call_id,
+                    name=fc.name,
+                    arguments=fc.args or {},
+                ))
+            yield {"type": "tool_calls", "tool_calls": normalized_tool_calls}
 
     def append_tool_round(self, messages: List[Dict], response: NormalizedResponse,
                            tool_results: List[str]) -> List[Dict]:

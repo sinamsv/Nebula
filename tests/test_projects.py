@@ -64,6 +64,13 @@ class SpyProvider(BaseProvider):
         self.last_system_prompt = system_prompt
         return NormalizedResponse(content=self.reply, tool_calls=[])
 
+    async def call_stream(self, messages, tools, system_prompt, images=None, model_override=None):
+        response = await self.call(messages, tools, system_prompt, images, model_override)
+        if response.content:
+            yield {"type": "content", "content": response.content}
+        if response.tool_calls:
+            yield {"type": "tool_calls", "tool_calls": response.tool_calls}
+
     def append_tool_round(self, messages, response, tool_results):
         return messages
 

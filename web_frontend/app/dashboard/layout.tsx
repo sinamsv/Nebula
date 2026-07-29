@@ -2,13 +2,13 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Menu, ShieldCheck, Coins } from "lucide-react";
+import { Menu, ShieldCheck, Coins, Moon, Sun, Sparkles } from "lucide-react";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import DashboardSidebar from "@/components/DashboardSidebar";
 import { useAuth } from "@/lib/AuthContext";
 import { useCoins } from "@/lib/CoinsContext";
-import { getHealth } from "@/lib/api";
-import { formatDuration } from "@/lib/utils";
+import { getHealth, API_BASE_URL } from "@/lib/api";
+import { formatDuration, cn } from "@/lib/utils";
 import type { CoinStatusResponse } from "@/types/api";
 
 const SIDEBAR_COLLAPSED_KEY = "nebula_sidebar_collapsed";
@@ -22,7 +22,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 }
 
 function DashboardShell({ children }: { children: ReactNode }) {
-  const { user, token, logout } = useAuth();
+  const { user, token, logout, updateUser } = useAuth();
   const { coins, refreshCoins } = useCoins();
   const router = useRouter();
 
@@ -36,6 +36,33 @@ function DashboardShell({ children }: { children: ReactNode }) {
   const [healthChecked, setHealthChecked] = useState(false);
 
   const [viewportHeight, setViewportHeight] = useState<string>("100dvh");
+
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [welcomeTheme, setWelcomeTheme] = useState("theme-nebula");
+
+  useEffect(() => {
+    if (user && user.welcome_seen === false) {
+      setShowWelcome(true);
+    }
+  }, [user]);
+
+  async function handleCompleteWelcome() {
+    if (!token || !user) return;
+    try {
+      await fetch(`${API_BASE_URL}/auth/welcome-seen`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+        },
+      });
+      localStorage.setItem("nebula_theme", welcomeTheme);
+      document.documentElement.className = welcomeTheme;
+      updateUser({ ...user, welcome_seen: true });
+      setShowWelcome(false);
+    } catch (err) {
+      console.error("Failed to complete welcome screen", err);
+    }
+  }
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
@@ -145,6 +172,59 @@ function DashboardShell({ children }: { children: ReactNode }) {
 
         <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
       </div>
+
+      {showWelcome && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 py-6 backdrop-blur-md animate-fade-in">
+          <div className="w-full max-w-lg rounded-2xl border border-nebula-border bg-nebula-bg-secondary p-6 shadow-glow sm:p-8 animate-scale-in">
+            <div className="text-center">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-nebula-purple to-nebula-pink text-white">
+                <Sparkles className="h-6 w-6" />
+              </div>
+              <h2 className="mt-4 font-display text-2xl font-bold tracking-tight text-nebula-text">Welcome to Nebula!</h2>
+              <p className="mt-2 text-sm text-nebula-text-secondary leading-normal">
+                We are thrilled to have you here. Let&apos;s start by setting up your visual theme. You can always change this later in Settings.
+              </p>
+            </div>
+
+            <div className="mt-8 space-y-3">
+              {[
+                { id: "theme-nebula", name: "Nebula", description: "Purple/pink branded theme (default)", icon: <Sparkles className="h-5 w-5" /> },
+                { id: "theme-dark", name: "Dark", description: "Neutral, simple dark theme", icon: <Moon className="h-5 w-5" /> },
+                { id: "theme-light", name: "Light", description: "Neutral, clean light theme", icon: <Sun className="h-5 w-5" /> },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    setWelcomeTheme(t.id);
+                    document.documentElement.className = t.id;
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-4 rounded-xl border p-4 text-left transition-colors cursor-pointer",
+                    welcomeTheme === t.id
+                      ? "border-nebula-purple bg-nebula-purple/10 text-nebula-text"
+                      : "border-nebula-border bg-white/[0.03] text-nebula-text-secondary hover:bg-white/[0.06] hover:text-nebula-text"
+                  )}
+                >
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/5">
+                    {t.icon}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-sm">{t.name}</p>
+                    <p className="text-xs text-nebula-text-secondary mt-0.5 leading-normal">{t.description}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={handleCompleteWelcome}
+              className="mt-8 flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-nebula-purple to-nebula-pink px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 cursor-pointer shadow-glow-pink"
+            >
+              Get Started
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

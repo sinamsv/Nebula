@@ -18,6 +18,7 @@ import {
   sendMessage,
   sendImageMessage,
   ApiError,
+  API_BASE_URL,
 } from "@/lib/api";
 import type { ChatMessage, ChatSummary, SearchMode } from "@/types/api";
 import ChatHistoryPopover from "@/components/ChatHistoryPopover";
@@ -41,7 +42,7 @@ import ChatHistoryPopover from "@/components/ChatHistoryPopover";
  * pure layout/CSS transition -- no change to how chats are created,
  * fetched, or sent.
  */
-export default function PlaygroundPage() {
+export default function ChatPage() {
   const { token, user } = useAuth();
   const { refreshCoins } = useCoins();
 
@@ -200,30 +201,130 @@ export default function PlaygroundPage() {
       source_platform: "web",
       timestamp: new Date().toISOString(),
     };
-    setMessages((prev) => [...prev, optimisticUserMessage]);
+    setMessages((prev) => [
+      ...prev,
+      optimisticUserMessage,
+      {
+        role: "assistant",
+        content: "",
+        source_platform: "web",
+        timestamp: new Date().toISOString(),
+        isStreaming: true,
+      },
+    ]);
     setSystemLines([]);
     setMemoryWarning(null);
     setIsSending(true);
 
     try {
-      const res = await sendMessage(token, chatId, text, { search: searchMode }, model);
-      if (res.reply_text) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: res.reply_text as string,
-            source_platform: "web",
-            timestamp: new Date().toISOString(),
-          },
-        ]);
+      const url = `${API_BASE_URL}/chat/${chatId}/messages`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          input: text,
+          tools: { search: searchMode },
+          model: model,
+          stream: true,
+        }),
+      });
+
+      if (!response.ok) {
+        let detail = "Streaming request failed.";
+        try {
+          const body = await response.json();
+          detail = body.detail || detail;
+        } catch {}
+        throw new Error(detail);
       }
-      setSystemLines(res.tool_messages ?? []);
-      setMemoryWarning(res.memory_warning ?? null);
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("No response body stream found.");
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accumulatedText = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data: ")) continue;
+
+          const jsonStr = trimmed.slice(6);
+          try {
+            const event = JSON.parse(jsonStr);
+            if (event.type === "content") {
+              accumulatedText += event.content;
+              setMessages((prev) => {
+                const copy = [...prev];
+                const last = copy[copy.length - 1];
+                if (last && last.role === "assistant") {
+                  last.content = accumulatedText;
+                }
+                return copy;
+              });
+            } else if (event.type === "tool_message") {
+              setSystemLines((prev) => [...prev, event.content]);
+            } else if (event.type === "error") {
+              throw new Error(event.error);
+            } else if (event.type === "done") {
+              if (event.reply_text !== undefined && event.reply_text !== null) {
+                accumulatedText = event.reply_text;
+              }
+              setMessages((prev) => {
+                const copy = [...prev];
+                const last = copy[copy.length - 1];
+                if (last && last.role === "assistant") {
+                  last.content = accumulatedText;
+                  last.isStreaming = false;
+                }
+                return copy;
+              });
+              setSystemLines(event.tool_messages ?? []);
+              setMemoryWarning(event.memory_warning ?? null);
+            }
+          } catch (e) {
+            console.error("Failed to parse SSE line", trimmed, e);
+          }
+        }
+      }
+
+      setMessages((prev) => {
+        const copy = [...prev];
+        const last = copy[copy.length - 1];
+        if (last && last.role === "assistant") {
+          last.isStreaming = false;
+        }
+        return copy;
+      });
+
       touchChatOrdering(chatId);
       refreshCoins(token);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Something went wrong sending that message.");
+    } catch (err: any) {
+      // If we errored out, remove the trailing empty message bubble and show error
+      setMessages((prev) => {
+        const copy = [...prev];
+        const last = copy[copy.length - 1];
+        if (last && last.role === "assistant" && !last.content) {
+          return copy.slice(0, -1);
+        } else if (last && last.role === "assistant") {
+          last.isStreaming = false;
+        }
+        return copy;
+      });
+      setError(err instanceof Error ? err.message : "Something went wrong sending that message.");
     } finally {
       setIsSending(false);
     }

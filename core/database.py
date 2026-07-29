@@ -95,6 +95,9 @@ class DatabaseManager:
         if 'unlimited_expires_at' not in existing_user_columns:
             cursor.execute("ALTER TABLE nebula_users ADD COLUMN unlimited_expires_at DATETIME")
             print("Migrated nebula_users: added unlimited_expires_at column")
+        if 'welcome_seen' not in existing_user_columns:
+            cursor.execute("ALTER TABLE nebula_users ADD COLUMN welcome_seen INTEGER NOT NULL DEFAULT 1")
+            print("Migrated nebula_users: added welcome_seen column")
 
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS platform_identities (
@@ -352,8 +355,8 @@ class DatabaseManager:
         cursor = conn.cursor()
         try:
             cursor.execute('''
-                INSERT INTO nebula_users (username, password_hash, display_name)
-                VALUES (?, ?, ?)
+                INSERT INTO nebula_users (username, password_hash, display_name, welcome_seen)
+                VALUES (?, ?, ?, 0)
             ''', (username, password_hash, display_name))
             nebula_user_id = cursor.lastrowid
 
@@ -375,7 +378,7 @@ class DatabaseManager:
         cursor = conn.cursor()
         cursor.execute('''
             SELECT nebula_user_id, username, password_hash, display_name,
-                   is_admin, is_approved, created_at, role, unlimited_mode, unlimited_expires_at
+                   is_admin, is_approved, created_at, role, unlimited_mode, unlimited_expires_at, welcome_seen
             FROM nebula_users WHERE username = ?
         ''', (username,))
         row = cursor.fetchone()
@@ -385,14 +388,15 @@ class DatabaseManager:
         return {
             'nebula_user_id': row[0], 'username': row[1], 'password_hash': row[2],
             'display_name': row[3], 'is_admin': bool(row[4]), 'is_approved': bool(row[5]),
-            'created_at': row[6], 'role': row[7], 'unlimited_mode': row[8], 'unlimited_expires_at': row[9]
+            'created_at': row[6], 'role': row[7], 'unlimited_mode': row[8], 'unlimited_expires_at': row[9],
+            'welcome_seen': bool(row[10])
         }
 
     def get_user_by_id(self, nebula_user_id: int) -> Optional[Dict]:
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT nebula_user_id, username, display_name, is_admin, is_approved, created_at, role, unlimited_mode, unlimited_expires_at
+            SELECT nebula_user_id, username, display_name, is_admin, is_approved, created_at, role, unlimited_mode, unlimited_expires_at, welcome_seen
             FROM nebula_users WHERE nebula_user_id = ?
         ''', (nebula_user_id,))
         row = cursor.fetchone()
@@ -402,7 +406,8 @@ class DatabaseManager:
         return {
             'nebula_user_id': row[0], 'username': row[1], 'display_name': row[2],
             'is_admin': bool(row[3]), 'is_approved': bool(row[4]), 'created_at': row[5],
-            'role': row[6], 'unlimited_mode': row[7], 'unlimited_expires_at': row[8]
+            'role': row[6], 'unlimited_mode': row[7], 'unlimited_expires_at': row[8],
+            'welcome_seen': bool(row[9])
         }
 
     def set_user_approval(self, nebula_user_id: int, approved: bool, approved_by: int) -> bool:
@@ -439,6 +444,17 @@ class DatabaseManager:
             SET role = ?, is_admin = ?, unlimited_mode = ?, unlimited_expires_at = ?
             WHERE nebula_user_id = ?
         ''', (role, is_admin, unlimited_mode, unlimited_expires_at, nebula_user_id))
+        conn.commit()
+        changed = cursor.rowcount > 0
+        conn.close()
+        return changed
+
+    def set_user_welcome_seen(self, nebula_user_id: int, welcome_seen: bool = True) -> bool:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE nebula_users SET welcome_seen = ? WHERE nebula_user_id = ?
+        ''', (1 if welcome_seen else 0, nebula_user_id))
         conn.commit()
         changed = cursor.rowcount > 0
         conn.close()
@@ -652,7 +668,7 @@ class DatabaseManager:
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT u.nebula_user_id, u.username, u.display_name, u.is_admin, u.is_approved, u.role, u.unlimited_mode, u.unlimited_expires_at
+            SELECT u.nebula_user_id, u.username, u.display_name, u.is_admin, u.is_approved, u.role, u.unlimited_mode, u.unlimited_expires_at, u.welcome_seen
             FROM platform_identities p
             JOIN nebula_users u ON u.nebula_user_id = p.nebula_user_id
             WHERE p.platform = ? AND p.platform_user_id = ?
@@ -664,7 +680,8 @@ class DatabaseManager:
         return {
             'nebula_user_id': row[0], 'username': row[1], 'display_name': row[2],
             'is_admin': bool(row[3]), 'is_approved': bool(row[4]),
-            'role': row[5], 'unlimited_mode': row[6], 'unlimited_expires_at': row[7]
+            'role': row[5], 'unlimited_mode': row[6], 'unlimited_expires_at': row[7],
+            'welcome_seen': bool(row[8])
         }
 
     # ------------------------------------------------------------------
