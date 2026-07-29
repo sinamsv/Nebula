@@ -18,6 +18,7 @@ class SignupResponse(BaseModel):
     became_admin: bool
     access_token: str
     token_type: str = "bearer"
+    welcome_seen: bool = False
 
 
 class LoginRequest(BaseModel):
@@ -32,6 +33,7 @@ class LoginResponse(BaseModel):
     is_admin: bool
     access_token: str
     token_type: str = "bearer"
+    welcome_seen: bool = True
 
 
 class BootstrapStatusResponse(BaseModel):

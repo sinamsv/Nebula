@@ -8,6 +8,69 @@
   --font-sans: "Inter", system-ui, sans-serif;
   --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Default to Nebula theme variables */
+  --bg-main: #09090B;
+  --bg-secondary: #111217;
+  --bg-surface: #0D0E13;
+  --bg-surface-hover: #15161D;
+  --text-main: #F5F5F5;
+  --text-secondary: #9A9AA5;
+  --text-tertiary: #6B6B76;
+  --border-main: rgba(255, 255, 255, 0.08);
+  --border-hover: rgba(255, 255, 255, 0.16);
+  --accent-purple: #9D4EDD;
+  --accent-pink: #FF5CA8;
+  --accent-blue: #53B9FF;
+  --nebula-glow: radial-gradient(circle at 20% 20%, rgba(157,78,221,0.18), transparent 45%), radial-gradient(circle at 80% 0%, rgba(83,185,255,0.14), transparent 40%), radial-gradient(circle at 50% 100%, rgba(255,92,168,0.12), transparent 45%);
+}
+
+.theme-nebula {
+  --bg-main: #09090B;
+  --bg-secondary: #111217;
+  --bg-surface: #0D0E13;
+  --bg-surface-hover: #15161D;
+  --text-main: #F5F5F5;
+  --text-secondary: #9A9AA5;
+  --text-tertiary: #6B6B76;
+  --border-main: rgba(255, 255, 255, 0.08);
+  --border-hover: rgba(255, 255, 255, 0.16);
+  --accent-purple: #9D4EDD;
+  --accent-pink: #FF5CA8;
+  --accent-blue: #53B9FF;
+  --nebula-glow: radial-gradient(circle at 20% 20%, rgba(157,78,221,0.18), transparent 45%), radial-gradient(circle at 80% 0%, rgba(83,185,255,0.14), transparent 40%), radial-gradient(circle at 50% 100%, rgba(255,92,168,0.12), transparent 45%);
+}
+
+.theme-dark {
+  --bg-main: #0B0B0C;
+  --bg-secondary: #121214;
+  --bg-surface: #18181C;
+  --bg-surface-hover: #222227;
+  --text-main: #ECECF1;
+  --text-secondary: #C5C5D2;
+  --text-tertiary: #8E8EA0;
+  --border-main: rgba(255, 255, 255, 0.08);
+  --border-hover: rgba(255, 255, 255, 0.16);
+  --accent-purple: #3b82f6;
+  --accent-pink: #3b82f6;
+  --accent-blue: #3b82f6;
+  --nebula-glow: none;
+}
+
+.theme-light {
+  --bg-main: #FFFFFF;
+  --bg-secondary: #F7F7F8;
+  --bg-surface: #ECECF1;
+  --bg-surface-hover: #D9D9E3;
+  --text-main: #1E1E1E;
+  --text-secondary: #4A4A5A;
+  --text-tertiary: #7F7F8F;
+  --border-main: rgba(0, 0, 0, 0.08);
+  --border-hover: rgba(0, 0, 0, 0.16);
+  --accent-purple: #10a37f;
+  --accent-pink: #10a37f;
+  --accent-blue: #10a37f;
+  --nebula-glow: none;
 }
 
 html {
@@ -15,11 +78,23 @@ html {
 }
 
 body {
-  background-color: #09090b;
-  color: #f5f5f5;
+  background-color: var(--bg-main);
+  color: var(--text-main);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Hide drifting nebula background blobs when not on Nebula theme */
+.theme-dark .bg-nebula-glow,
+.theme-dark [class*="bg-nebula-purple"],
+.theme-dark [class*="bg-nebula-blue"],
+.theme-dark [class*="bg-nebula-pink"],
+.theme-light .bg-nebula-glow,
+.theme-light [class*="bg-nebula-purple"],
+.theme-light [class*="bg-nebula-blue"],
+.theme-light [class*="bg-nebula-pink"] {
+  display: none !important;
 }
 
 /* Thin, unobtrusive scrollbars that fit the dark glass aesthetic */

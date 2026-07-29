@@ -83,7 +83,7 @@ before this change (no new instruction is injected in "smart" mode).
 import json
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from core.auth import AuthManager
 from core.memory import MemoryManager
@@ -687,6 +687,293 @@ class AIHandler:
 
         result.memory_warning = self.memory.approaching_full_warning(usage_after_user_msg)
         return result
+
+    async def handle_turn_stream(
+        self,
+        *,
+        source_platform: str,
+        platform_user_id: str,
+        display_name: str,
+        message_text: str,
+        discord_guild=None,
+        chat_id: Optional[int] = None,
+        images: Optional[List[ImageAttachment]] = None,
+        search_mode: str = "smart",
+        model: Optional[str] = None,
+        project_id: Optional[str] = None,
+        project_chat_id: Optional[str] = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        if search_mode not in VALID_SEARCH_MODES:
+            search_mode = "smart"
+
+        try:
+            identity = self.auth.require_approved_identity(source_platform, platform_user_id)
+        except Exception as e:
+            yield {"type": "error", "error": str(e)}
+            return
+
+        nebula_user_id = identity['nebula_user_id']
+        username = identity['username']
+
+        project_instruction = None
+        project_knowledge = None
+        if project_id:
+            from web_backend.project_store import ProjectStore
+            store = ProjectStore()
+            try:
+                store.get_project_metadata(username, project_id)
+                project_instruction = store.read_instruction(username, project_id)
+                project_knowledge_dict = store.read_knowledge_files_contents(username, project_id)
+                if project_knowledge_dict:
+                    project_knowledge = "\n\n## Project Uploaded Files (Knowledge Base)\n"
+                    for filename, content in project_knowledge_dict.items():
+                        project_knowledge += f"\n### File: {filename}\n"
+                        project_knowledge += f"```\n{content}\n```\n"
+            except Exception as e:
+                yield {"type": "error", "error": f"❌ Project access error: {str(e)}"}
+                return
+
+        if project_id and project_chat_id:
+            try:
+                chat_data = store.get_chat(username, project_id, project_chat_id)
+                conversation_history = [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in chat_data.get("messages", [])
+                ]
+            except Exception as e:
+                yield {"type": "error", "error": f"❌ Project chat loading error: {str(e)}"}
+                return
+        else:
+            conversation_history = self.memory.get_conversation_context(nebula_user_id, chat_id=chat_id)
+
+        if project_id and project_chat_id:
+            history_text = "".join(m["content"] for m in conversation_history)
+            total_tokens = self.memory.count_tokens(history_text)
+            if total_tokens >= self.memory.MAX_TOKENS:
+                yield {"type": "error", "error": self.memory.full_chat_memory_message(display_name, chat_data.get("title", "Project Chat"))}
+                return
+        else:
+            if self.memory.is_full(nebula_user_id, chat_id=chat_id):
+                if chat_id is not None:
+                    chat = self.db.get_chat(chat_id)
+                    chat_title = chat['title'] if chat else "this chat"
+                    yield {"type": "error", "error": self.memory.full_chat_memory_message(display_name, chat_title)}
+                else:
+                    yield {"type": "error", "error": self.memory.full_memory_message(display_name)}
+                return
+
+        if self.coin_manager:
+            role_info = self.coin_manager.get_user_role_and_limits(nebula_user_id)
+            role = role_info['role']
+        else:
+            user_info = self.db.get_user_by_id(nebula_user_id)
+            role = user_info['role'] if user_info else 'Member'
+
+        role_settings = self.db.get_role_settings(role)
+        allowed_tools = role_settings['allowed_tools'] if role_settings else ["search"]
+
+        all_models = self.db.get_all_models()
+        user_available_models = [m for m in all_models if (role == 'Admin' or role in m['allowed_roles'])]
+
+        chosen_model = model
+        if not chosen_model:
+            if user_available_models:
+                chosen_model = user_available_models[0]['model_id']
+            elif all_models:
+                chosen_model = all_models[0]['model_id']
+            else:
+                chosen_model = 'google/gemini-3.1-flash-lite'
+        else:
+            model_entry = next((m for m in all_models if m['model_id'] == chosen_model), None)
+            if not model_entry:
+                yield {"type": "error", "error": f"❌ Model '{chosen_model}' is not configured in this deployment."}
+                return
+            if role != 'Admin' and role not in model_entry['allowed_roles']:
+                yield {"type": "error", "error": f"❌ Your role '{role}' is not permitted to use model '{chosen_model}'."}
+                return
+
+        is_admin = identity['is_admin']
+        supports_guild_moderation = discord_guild is not None
+
+        messages = list(conversation_history)
+        messages.append({"role": "user", "content": f"[{display_name}]: {message_text}"})
+
+        turn_system_prompt = self.system_prompt
+        if project_instruction:
+            turn_system_prompt += f"\n\n## Project Specific Instructions\n{project_instruction}"
+        if project_knowledge:
+            turn_system_prompt += project_knowledge
+        if search_mode == "on":
+            turn_system_prompt = turn_system_prompt + _SEARCH_ON_INSTRUCTION
+
+        if self.coin_manager:
+            input_tokens = sum(self.memory.count_tokens(m['content']) for m in messages) + self.memory.count_tokens(turn_system_prompt)
+            projected_cost = input_tokens * self.coin_manager.INPUT_TOKEN_MULTIPLIER
+            spend_result = self.coin_manager.check_and_spend(nebula_user_id, projected_cost, 'input_tokens')
+            if not spend_result['success']:
+                yield {"type": "error", "error": self.coin_manager.insufficient_funds_message(
+                    display_name, spend_result['seconds_until_reset']
+                )}
+                return
+
+        if not self.provider:
+            yield {"type": "error", "error": self.user_facing_unconfigured_message()}
+            return
+
+        if project_id and project_chat_id:
+            user_msg_tokens = self.memory.count_tokens(message_text)
+            chat_data = store.append_chat_message(username, project_id, project_chat_id, "user", message_text, token_count=user_msg_tokens)
+
+            total_tokens = sum(m.get('token_count', 0) for m in chat_data["messages"])
+            percentage = (total_tokens / self.memory.MAX_TOKENS) * 100 if self.memory.MAX_TOKENS else 0
+            usage_after_user_msg = {
+                'total_tokens': total_tokens,
+                'max_tokens': self.memory.MAX_TOKENS,
+                'percentage': round(percentage, 2),
+                'remaining': max(0, self.memory.MAX_TOKENS - total_tokens),
+                'is_full': total_tokens >= self.memory.MAX_TOKENS,
+            }
+        else:
+            usage_after_user_msg = await self.memory.add_message_to_memory(
+                nebula_user_id, "user", message_text, source_platform, chat_id=chat_id
+            )
+
+        final_content = None
+        tool_messages = []
+        tools = self.get_available_tools(is_admin, supports_guild_moderation, search_mode=search_mode, allowed_tools=allowed_tools)
+        for round_index in range(self.MAX_TOOL_ROUNDS):
+            accumulated_text = []
+            accumulated_tool_calls = []
+            try:
+                async for chunk in self.provider.call_stream(
+                    messages, tools, turn_system_prompt,
+                    images=images if round_index == 0 else None,
+                    model_override=chosen_model,
+                ):
+                    if chunk["type"] == "content":
+                        if not accumulated_tool_calls:
+                            yield {"type": "content", "content": chunk["content"]}
+                            accumulated_text.append(chunk["content"])
+                    elif chunk["type"] == "tool_calls":
+                        accumulated_tool_calls.extend(chunk["tool_calls"])
+            except Exception as e:
+                print(f"Error calling AI backend: {e}")
+                yield {"type": "error", "error": f"Sorry {display_name}, I encountered an error processing your message. Please try again."}
+                return
+
+            if not accumulated_tool_calls:
+                final_content = "".join(accumulated_text)
+                break
+
+            tool_results = []
+            for tool_call in accumulated_tool_calls:
+                if tool_call.name != "search" and self.coin_manager:
+                    self.coin_manager.check_and_spend(nebula_user_id, 2.0, 'tool_call')
+
+                tool_result = await self._execute_tool(
+                    tool_call.name, tool_call.arguments, nebula_user_id, display_name,
+                    identity, discord_guild
+                )
+                if tool_result:
+                    yield {"type": "tool_message", "content": tool_result}
+                    tool_messages.append(tool_result)
+                tool_results.append(tool_result)
+
+            class MockRaw:
+                def __init__(self, content, tool_calls):
+                    class Block:
+                        def __init__(self, type, text=None, id=None, name=None, input=None):
+                            self.type = type
+                            self.text = text
+                            self.id = id
+                            self.name = name
+                            self.input = input
+                    self.content = []
+                    if content:
+                        self.content.append(Block(type="text", text=content))
+                    for tc in tool_calls:
+                        self.content.append(Block(type="tool_use", id=tc.id, name=tc.name, input=tc.arguments))
+                    class Candidate:
+                        class Content:
+                            def __init__(self, parts, role="model"):
+                                self.role = role
+                                self.parts = parts
+                        def __init__(self, content):
+                            self.content = content
+                    class Part:
+                        def __init__(self, text=None, function_call=None):
+                            self.text = text
+                            self.function_call = function_call
+                    class FunctionCall:
+                        def __init__(self, name, args, id=None):
+                            self.name = name
+                            self.args = args
+                            self.id = id
+                    parts = []
+                    if content:
+                        parts.append(Part(text=content))
+                    for tc in tool_calls:
+                        parts.append(Part(function_call=FunctionCall(name=tc.name, args=tc.arguments, id=tc.id)))
+                    self.candidates = [Candidate(Content(parts=parts))]
+                    self.tool_calls = []
+                    for tc in tool_calls:
+                        class Function:
+                            def __init__(self, name, arguments):
+                                self.name = name
+                                self.arguments = json.dumps(arguments)
+                        class ToolCall:
+                            def __init__(self, id, function):
+                                self.id = id
+                                self.function = function
+                        self.tool_calls.append(ToolCall(id=tc.id, function=Function(name=tc.name, arguments=tc.arguments)))
+                def model_dump(self, exclude_unset=False):
+                    return {
+                        "role": "assistant",
+                        "content": "".join(accumulated_text) if accumulated_text else None,
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.name,
+                                    "arguments": json.dumps(tc.arguments)
+                                }
+                            }
+                            for tc in accumulated_tool_calls
+                        ]
+                    }
+
+            response = NormalizedResponse(
+                content="".join(accumulated_text) if accumulated_text else None,
+                tool_calls=accumulated_tool_calls,
+                raw=MockRaw("".join(accumulated_text) if accumulated_text else None, accumulated_tool_calls),
+            )
+
+            messages = self.provider.append_tool_round(messages, response, tool_results)
+
+        if final_content:
+            if project_id and project_chat_id:
+                assistant_tokens = self.memory.count_tokens(final_content)
+                store.append_chat_message(username, project_id, project_chat_id, "assistant", final_content, token_count=assistant_tokens)
+            else:
+                await self.memory.add_message_to_memory(
+                    nebula_user_id, "assistant", final_content, source_platform, chat_id=chat_id
+                )
+            if self.coin_manager:
+                output_tokens = self.memory.count_tokens(final_content)
+                output_cost = output_tokens * self.coin_manager.OUTPUT_TOKEN_MULTIPLIER
+                self.coin_manager.check_and_spend(nebula_user_id, output_cost, 'output_tokens')
+
+        memory_warning = self.memory.approaching_full_warning(usage_after_user_msg)
+        usage = self.memory.get_usage(nebula_user_id, chat_id=chat_id)
+
+        yield {
+            "type": "done",
+            "reply_text": final_content,
+            "tool_messages": tool_messages,
+            "memory_warning": memory_warning,
+            "usage": usage
+        }
 
     async def _execute_tool(self, function_name: str, function_args: Dict, nebula_user_id: int,
                              display_name: str, identity: Dict, discord_guild) -> Optional[str]:

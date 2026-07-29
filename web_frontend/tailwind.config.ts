@@ -9,20 +9,18 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Nebula palette -- unchanged brand hues, refined neutrals for
-        // clearer surface hierarchy (panel vs. page vs. hover states).
-        "nebula-bg": "#09090B",
-        "nebula-bg-secondary": "#111217",
-        "nebula-surface": "#0D0E13",
-        "nebula-surface-hover": "#15161D",
-        "nebula-pink": "#FF5CA8",
-        "nebula-purple": "#9D4EDD",
-        "nebula-blue": "#53B9FF",
-        "nebula-text": "#F5F5F5",
-        "nebula-text-secondary": "#9A9AA5",
-        "nebula-text-tertiary": "#6B6B76",
-        "nebula-border": "rgba(255,255,255,0.08)",
-        "nebula-border-hover": "rgba(255,255,255,0.16)",
+        "nebula-bg": "var(--bg-main)",
+        "nebula-bg-secondary": "var(--bg-secondary)",
+        "nebula-surface": "var(--bg-surface)",
+        "nebula-surface-hover": "var(--bg-surface-hover)",
+        "nebula-pink": "var(--accent-pink)",
+        "nebula-purple": "var(--accent-purple)",
+        "nebula-blue": "var(--accent-blue)",
+        "nebula-text": "var(--text-main)",
+        "nebula-text-secondary": "var(--text-secondary)",
+        "nebula-text-tertiary": "var(--text-tertiary)",
+        "nebula-border": "var(--border-main)",
+        "nebula-border-hover": "var(--border-hover)",
       },
       fontFamily: {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
@@ -30,8 +28,8 @@ const config: Config = {
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
       backgroundImage: {
-        "nebula-glow": "radial-gradient(circle at 20% 20%, rgba(157,78,221,0.18), transparent 45%), radial-gradient(circle at 80% 0%, rgba(83,185,255,0.14), transparent 40%), radial-gradient(circle at 50% 100%, rgba(255,92,168,0.12), transparent 45%)",
-        "nebula-text-gradient": "linear-gradient(90deg, #FF5CA8 0%, #9D4EDD 50%, #53B9FF 100%)",
+        "nebula-glow": "var(--nebula-glow)",
+        "nebula-text-gradient": "linear-gradient(90deg, var(--accent-pink) 0%, var(--accent-purple) 50%, var(--accent-blue) 100%)",
       },
       boxShadow: {
         glow: "0 0 40px -10px rgba(157, 78, 221, 0.35)",

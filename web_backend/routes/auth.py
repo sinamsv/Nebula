@@ -25,7 +25,7 @@ from fastapi.responses import RedirectResponse
 from core.auth import AuthError, AuthManager
 from core.crypto import TokenCipher
 from core.database import DatabaseManager
-from web_backend.dependencies import WEB_PLATFORM, get_auth, get_db, get_token_cipher
+from web_backend.dependencies import WEB_PLATFORM, get_auth, get_db, get_token_cipher, get_current_identity
 from web_backend.schemas.auth import (
     BootstrapStatusResponse,
     LoginRequest,
@@ -118,6 +118,7 @@ async def signup(body: SignupRequest, auth: AuthManager = Depends(get_auth)):
         is_approved=result['is_approved'],
         became_admin=result['became_admin'],
         access_token=token,
+        welcome_seen=bool(result.get('welcome_seen', False)),
     )
 
 
@@ -165,7 +166,26 @@ async def login(body: LoginRequest, auth: AuthManager = Depends(get_auth)):
         is_approved=result['is_approved'],
         is_admin=result['is_admin'],
         access_token=token,
+        welcome_seen=bool(result.get('welcome_seen', True)),
     )
+
+
+@router.get("/status")
+async def get_auth_status(identity: dict = Depends(get_current_identity)):
+    return {
+        "is_approved": identity["is_approved"],
+        "is_admin": identity["is_admin"],
+        "welcome_seen": bool(identity.get("welcome_seen", True)),
+    }
+
+
+@router.post("/welcome-seen")
+async def mark_welcome_seen(
+    identity: dict = Depends(get_current_identity),
+    db: DatabaseManager = Depends(get_db),
+):
+    db.set_user_welcome_seen(identity['nebula_user_id'], True)
+    return {"success": True}
 
 
 # ------------------------------------------------------------------

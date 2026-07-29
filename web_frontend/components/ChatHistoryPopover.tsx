@@ -66,7 +66,7 @@ export default function ChatHistoryPopover({
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm font-medium text-nebula-text transition-colors hover:bg-white/5 cursor-pointer"
       >
-        <span className="max-w-[50vw] truncate sm:max-w-xs">{activeChat?.title ?? "Playground"}</span>
+        <span className="max-w-[50vw] truncate sm:max-w-xs">{activeChat?.title ?? "Chat"}</span>
         <ChevronDown className={cn("h-3.5 w-3.5 text-nebula-text-secondary transition-transform", open && "rotate-180")} />
       </button>
 

@@ -26,6 +26,7 @@ import {
   setStoredToken,
   setStoredUserJson,
 } from "@/lib/tokenStorage";
+import { API_BASE_URL } from "@/lib/api";
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -43,6 +44,7 @@ interface AuthContextValue {
    * until other calls fill it in. */
   applyBareToken: (token: string) => void;
   logout: () => void;
+  updateUser: (updatedUser: AuthUser) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -85,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         display_name: result.username,
         is_approved: result.is_approved,
         is_admin: result.is_admin,
+        welcome_seen: result.welcome_seen,
       };
       persist(result.access_token, nextUser);
     },
@@ -103,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // bootstrap key, which is also exactly when the account is
         // an admin from this point forward.
         is_admin: result.became_admin,
+        welcome_seen: result.welcome_seen,
       };
       persist(result.access_token, nextUser);
     },
@@ -122,9 +126,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const updateUser = useCallback((nextUser: AuthUser) => {
+    setStoredUserJson(JSON.stringify(nextUser));
+    setUser(nextUser);
+  }, []);
+
+  useEffect(() => {
+    if (!token || !user || user.is_approved) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/auth/status`, {
+          headers: {
+            "Authorization": `Bearer ${token}`,
+          },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.is_approved) {
+            const nextUser = { ...user, is_approved: true };
+            setUser(nextUser);
+            setStoredUserJson(JSON.stringify(nextUser));
+          }
+        }
+      } catch (err) {
+        console.error("Failed to poll approval status", err);
+      }
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, [token, user]);
+
   const value = useMemo<AuthContextValue>(
-    () => ({ user, token, isLoading, applyLoginResult, applySignupResult, applyBareToken, logout }),
-    [user, token, isLoading, applyLoginResult, applySignupResult, applyBareToken, logout]
+    () => ({ user, token, isLoading, applyLoginResult, applySignupResult, applyBareToken, logout, updateUser }),
+    [user, token, isLoading, applyLoginResult, applySignupResult, applyBareToken, logout, updateUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

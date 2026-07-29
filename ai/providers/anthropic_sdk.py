@@ -33,7 +33,7 @@ rejecting anything else before it reaches this provider.
 """
 import base64
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from anthropic import AsyncAnthropic
 
@@ -132,6 +132,50 @@ class AnthropicSDKProvider(BaseProvider):
             tool_calls=normalized_tool_calls,
             raw=response,
         )
+
+    async def call_stream(self, messages: List[Dict], tools: List[Dict],
+                          system_prompt: str,
+                          images: Optional[List[ImageAttachment]] = None,
+                          model_override: Optional[str] = None) -> AsyncGenerator[Dict[str, Any], None]:
+        anthropic_tools = [self._to_anthropic_tool(t) for t in tools] if tools else None
+
+        call_messages = list(messages)
+        if images:
+            call_messages[-1] = self._attach_images_to_message(call_messages[-1], images)
+
+        kwargs: Dict[str, Any] = {
+            "model": model_override or self.model,
+            "system": system_prompt,
+            "messages": call_messages,
+            "max_tokens": 2000,
+            "temperature": self.temperature,
+        }
+        if anthropic_tools:
+            kwargs["tools"] = anthropic_tools
+            kwargs["tool_choice"] = {"type": "auto"}
+        if self.budget_tokens is not None:
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": self.budget_tokens}
+            kwargs["max_tokens"] = max(2000, self.budget_tokens + 1024)
+
+        async with self.client.messages.stream(**kwargs) as stream:
+            async for event in stream:
+                if event.type == "content_block_delta":
+                    if event.delta.type == "text_delta":
+                        yield {"type": "content", "content": event.delta.text}
+
+            final_message = await stream.get_final_message()
+
+        normalized_tool_calls = []
+        for block in final_message.content:
+            if block.type == "tool_use":
+                normalized_tool_calls.append(NormalizedToolCall(
+                    id=block.id,
+                    name=block.name,
+                    arguments=block.input,
+                ))
+
+        if normalized_tool_calls:
+            yield {"type": "tool_calls", "tool_calls": normalized_tool_calls}
 
     @staticmethod
     def _attach_images_to_message(message: Dict, images: List[ImageAttachment]) -> Dict:

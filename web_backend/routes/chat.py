@@ -28,7 +28,9 @@ search_mode parameter -- all the actual behavior lives in ai/handler.py.
 """
 from typing import Optional
 
+import json
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
 
 from ai.handler import AIHandler
 from ai.providers.base import ImageAttachment
@@ -163,7 +165,7 @@ async def delete_chat(
     db.delete_chat(chat_id)
 
 
-@router.post("/{chat_id}/messages", response_model=SendMessageResponse)
+@router.post("/{chat_id}/messages")
 async def send_message(
     chat_id: int,
     body: SendMessageRequest,
@@ -173,6 +175,12 @@ async def send_message(
     ai_handler: AIHandler = Depends(get_ai_handler),
 ):
     _require_owned_chat(db, chat_id, identity['nebula_user_id'])
+    if body.stream:
+        return await _run_turn_stream(
+            identity, chat_id, body.input, ai_handler,
+            images=None, search_mode=body.tools.search,
+            model=body.model,
+        )
     return await _run_turn(
         identity, chat_id, body.input, ai_handler, memory,
         images=None, search_mode=body.tools.search,
@@ -278,3 +286,33 @@ async def _run_turn(
         memory_warning=result.memory_warning,
         usage=usage,
     )
+
+
+async def _run_turn_stream(
+    identity: dict,
+    chat_id: int,
+    message_text: str,
+    ai_handler: AIHandler,
+    images: Optional[list],
+    search_mode: str = "smart",
+    model: Optional[str] = None,
+):
+    async def sse_generator():
+        try:
+            async for event in ai_handler.handle_turn_stream(
+                source_platform=WEB_PLATFORM,
+                platform_user_id=str(identity['nebula_user_id']),
+                display_name=identity['display_name'],
+                message_text=message_text,
+                discord_guild=None,
+                chat_id=chat_id,
+                images=images,
+                search_mode=search_mode,
+                model=model,
+            ):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            err_event = {"type": "error", "error": f"An error occurred while streaming response: {str(e)}"}
+            yield f"data: {json.dumps(err_event)}\n\n"
+
+    return StreamingResponse(sse_generator(), media_type="text/event-stream")

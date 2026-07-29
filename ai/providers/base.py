@@ -59,7 +59,7 @@ three:
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 
 @dataclass
@@ -205,6 +205,24 @@ class BaseProvider(ABC):
         unaffected by this addition. Only meaningful on the FIRST
         call() of a turn (round one) -- images are never attached to
         synthetic tool-round messages.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def call_stream(
+        self,
+        messages: List[Dict],
+        tools: List[Dict],
+        system_prompt: str,
+        images: Optional[List[ImageAttachment]] = None,
+        model_override: Optional[str] = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Make one request to this provider's API and yield streaming chunks.
+
+        Yields:
+            Dict with "type": "content" and "content": <str> for text tokens,
+            OR "type": "tool_calls" and "tool_calls": List[NormalizedToolCall] once complete,
+            OR "type": "raw" containing raw chunk or message if needed.
         """
         raise NotImplementedError
 

@@ -72,6 +72,7 @@ class SendMessageRequest(BaseModel):
     input: str
     tools: ToolToggles = ToolToggles()
     model: Optional[str] = None
+    stream: bool = False
 
 
 class SendMessageResponse(BaseModel):
