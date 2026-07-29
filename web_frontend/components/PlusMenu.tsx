@@ -60,7 +60,7 @@ export default function PlusMenu({ onPickImage, searchMode, onSearchModeChange, 
       </button>
 
       {open ? (
-        <div className="absolute bottom-full left-0 z-30 mb-2 w-64 rounded-xl border border-nebula-border bg-nebula-surface/95 p-1.5 shadow-glow-soft backdrop-blur-xl animate-scale-in">
+        <div className="absolute bottom-full left-0 z-30 mb-2 w-64 rounded-xl border border-nebula-border bg-nebula-surface/75 p-1.5 shadow-glow-soft backdrop-blur-xl animate-scale-in">
           <button
             onClick={() => {
               onPickImage();

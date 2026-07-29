@@ -218,10 +218,10 @@ class DatabaseManager:
 
         # Seed default role settings
         default_settings = [
-            ('Member', '["google/gemini-3.1-flash-lite"]', '["search"]', 50.0, 200.0),
-            ('Trusted', '["google/gemini-3.1-flash-lite"]', '["search"]', 150.0, 600.0),
-            ('Researcher', '["google/gemini-3.1-flash-lite"]', '["search"]', 500.0, 2000.0),
-            ('Admin', '["google/gemini-3.1-flash-lite"]', '["search"]', -1.0, -1.0)
+            ('Member', '[]', '["search"]', 50.0, 200.0),
+            ('Trusted', '[]', '["search"]', 150.0, 600.0),
+            ('Researcher', '[]', '["search"]', 500.0, 2000.0),
+            ('Admin', '[]', '["search"]', -1.0, -1.0)
         ]
         for r_name, models, tools, daily, weekly in default_settings:
             cursor.execute('''
@@ -240,16 +240,6 @@ class DatabaseManager:
                 allowed_roles TEXT NOT NULL
             )
         ''')
-
-        # Seed default models config
-        default_models = [
-            ('google/gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite', '["Member", "Trusted", "Researcher", "Admin"]')
-        ]
-        for m_id, name, roles in default_models:
-            cursor.execute('''
-                INSERT OR IGNORE INTO models_config (model_id, display_name, allowed_roles)
-                VALUES (?, ?, ?)
-            ''', (m_id, name, roles))
 
         # ------------------------------------------------------------
         # Coin transactions (rolling rate limit transaction log)
