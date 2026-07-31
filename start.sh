@@ -1,9 +1,17 @@
 #!/bin/bash
 
-# start.sh - Local development script for Nebula
+# start.sh - Startup script for Nebula (local development AND Docker runtime)
 # Starts the FastAPI backend and Next.js frontend concurrently,
-# handles dependency installation and builds when needed,
+# handles dependency installation and builds when needed (local dev only),
 # and cleans up background tasks gracefully.
+#
+# In Docker: the image build already runs `pip install` and
+# `npm install && npm run build` (see Dockerfile), so this script skips
+# those checks entirely when SKIP_DEPS_CHECK=true is set (Dockerfile sets
+# this via ENV). This keeps container startup fast and avoids silently
+# masking a broken image with a runtime install/build.
+# Locally (SKIP_DEPS_CHECK unset), this script still auto-installs/builds
+# as needed, since there's no separate build step.
 
 # Force exit if any setup command fails
 set -e
@@ -29,6 +37,7 @@ fi
 FRONTEND_DIR="web_frontend"
 NODE_ENV=${NODE_ENV:-development}
 PORT=${PORT:-8080}
+SKIP_DEPS_CHECK=${SKIP_DEPS_CHECK:-false}
 
 if [ ! -d "$FRONTEND_DIR" ]; then
   echo "ERROR: $FRONTEND_DIR directory not found."
@@ -36,17 +45,24 @@ if [ ! -d "$FRONTEND_DIR" ]; then
 fi
 
 # 2. Automatically detect and handle node_modules / dependencies
-if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
-  echo "web_frontend/node_modules is missing. Running 'npm install' inside $FRONTEND_DIR..."
-  (cd "$FRONTEND_DIR" && npm install)
-fi
-
-# 3. Automatically detect and handle production build
-if [ "$NODE_ENV" != "development" ]; then
-  if [ ! -d "$FRONTEND_DIR/.next" ]; then
-    echo "web_frontend/.next is missing and NODE_ENV is '$NODE_ENV'. Running 'npm run build' inside $FRONTEND_DIR..."
-    (cd "$FRONTEND_DIR" && npm run build)
+# Skipped in Docker (SKIP_DEPS_CHECK=true): the image build already ran
+# `npm install`, so re-checking here only costs time on every container
+# start and can't fix anything a broken image wouldn't need rebuilding for.
+if [ "$SKIP_DEPS_CHECK" != "true" ]; then
+  if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
+    echo "web_frontend/node_modules is missing. Running 'npm install' inside $FRONTEND_DIR..."
+    (cd "$FRONTEND_DIR" && npm install)
   fi
+
+  # 3. Automatically detect and handle production build
+  if [ "$NODE_ENV" != "development" ]; then
+    if [ ! -d "$FRONTEND_DIR/.next" ]; then
+      echo "web_frontend/.next is missing and NODE_ENV is '$NODE_ENV'. Running 'npm run build' inside $FRONTEND_DIR..."
+      (cd "$FRONTEND_DIR" && npm run build)
+    fi
+  fi
+else
+  echo "SKIP_DEPS_CHECK=true: skipping dependency install/build checks (expected pre-built image)."
 fi
 
 # Disable set -e so that we can manage background process execution
