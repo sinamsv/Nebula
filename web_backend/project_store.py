@@ -90,7 +90,8 @@ class ProjectStore:
             "description": description,
             "owner": owner,
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
+            "pinned": False
         }
 
         # Save metadata.json
@@ -128,6 +129,9 @@ class ProjectStore:
         # Enforce owner-only access control
         if metadata.get("owner") != username:
             raise ProjectPermissionError("Access denied. You do not own this project.")
+
+        # Handle fallback for older metadata on disk
+        metadata["pinned"] = metadata.get("pinned", False)
 
         return metadata
 
@@ -171,6 +175,49 @@ class ProjectStore:
         except OSError as e:
             raise ProjectStorageError(f"Failed to delete project directory: {e}")
 
+    def set_pinned(self, username: str, project_id: str, pinned: bool) -> Dict[str, Any]:
+        """Flips the pinned state and touches the project timestamp."""
+        metadata = self.get_project_metadata(username, project_id)
+        metadata["pinned"] = pinned
+
+        project_dir = self._get_project_dir(username, project_id)
+        metadata_path = os.path.join(project_dir, "metadata.json")
+
+        try:
+            with open(metadata_path, "w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=2, ensure_ascii=False)
+        except OSError as e:
+            raise ProjectStorageError(f"Failed to write metadata.json: {e}")
+
+        self._touch_project(username, project_id)
+        return self.get_project_metadata(username, project_id)
+
+    def update_project_metadata(self, username: str, project_id: str,
+                                 name: Optional[str] = None,
+                                 description: Optional[str] = None) -> Dict[str, Any]:
+        """Updates name and/or description if provided, validating non-empty name."""
+        metadata = self.get_project_metadata(username, project_id)
+
+        if name is not None:
+            if not name.strip():
+                raise ProjectValidationError("Project name cannot be empty.")
+            metadata["name"] = name
+
+        if description is not None:
+            metadata["description"] = description
+
+        project_dir = self._get_project_dir(username, project_id)
+        metadata_path = os.path.join(project_dir, "metadata.json")
+
+        try:
+            with open(metadata_path, "w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=2, ensure_ascii=False)
+        except OSError as e:
+            raise ProjectStorageError(f"Failed to write metadata.json: {e}")
+
+        self._touch_project(username, project_id)
+        return self.get_project_metadata(username, project_id)
+
     def update_instruction(self, username: str, project_id: str, instruction: str) -> None:
         """Updates instruction.md and updates the project's updated_at timestamp."""
         self.get_project_metadata(username, project_id)  # verify existence & owner
@@ -202,9 +249,13 @@ class ProjectStore:
         except OSError as e:
             raise ProjectStorageError(f"Failed to read instruction.md: {e}")
 
-    def save_knowledge_file(self, username: str, project_id: str, filename: str, content_bytes: bytes) -> None:
+    def save_knowledge_file(self, username: str, project_id: str, filename: str, content_bytes: bytes, max_bytes: Optional[int] = None) -> None:
         """Saves or overwrites a knowledge file inside project knowledge/."""
         self.get_project_metadata(username, project_id)  # verify existence & owner
+
+        if max_bytes is not None and len(content_bytes) > max_bytes:
+            max_mb = max_bytes / (1024 * 1024)
+            raise ProjectValidationError(f"File size exceeds the maximum limit of {max_mb:.0f}MB for your role.")
 
         # Strict filename sanitization to prevent directory traversal within the project directory
         clean_filename = os.path.basename(filename)

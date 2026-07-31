@@ -63,6 +63,7 @@ class RoleSettingItem(BaseModel):
     allowed_tools: List[str]
     daily_limit: float
     weekly_limit: float
+    max_upload_mb: int
 
 
 class RoleSettingsListResponse(BaseModel):
@@ -75,6 +76,7 @@ class RoleSettingsUpdateRequest(BaseModel):
     allowed_tools: List[str]
     daily_limit: float
     weekly_limit: float
+    max_upload_mb: int
 
 
 class UserUsageResponse(BaseModel):

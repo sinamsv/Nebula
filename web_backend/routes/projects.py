@@ -29,6 +29,8 @@ from web_backend.schemas.projects import (
     ProjectChatMessage,
     ProjectSendMessageRequest,
     ProjectSendMessageResponse,
+    ProjectUpdateRequest,
+    ProjectDetailResponse,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["projects"])
@@ -94,6 +96,55 @@ async def create_project(
     return ProjectMetadataResponse(**project)
 
 
+@router.get("/project/{project_id}", response_model=ProjectDetailResponse)
+async def get_project_details(
+    project_id: str,
+    identity: dict = Depends(require_approved_identity_web),
+):
+    """Returns the full project details: metadata, instructions, and file list. Owner-only."""
+    store = ProjectStore()
+    metadata = _map_exceptions(store.get_project_metadata, identity["username"], project_id)
+    instruction = _map_exceptions(store.read_instruction, identity["username"], project_id)
+    files = _map_exceptions(store.list_knowledge_files, identity["username"], project_id)
+
+    return ProjectDetailResponse(
+        id=metadata["id"],
+        name=metadata["name"],
+        description=metadata["description"],
+        owner=metadata["owner"],
+        created_at=metadata["created_at"],
+        updated_at=metadata["updated_at"],
+        pinned=metadata["pinned"],
+        instruction=instruction,
+        files=files
+    )
+
+
+@router.patch("/project/{project_id}", response_model=ProjectMetadataResponse)
+async def update_project(
+    project_id: str,
+    body: ProjectUpdateRequest,
+    identity: dict = Depends(require_approved_identity_web),
+):
+    """Updates project's name, description, and/or pinned status. Owner-only."""
+    if body.name is None and body.description is None and body.pinned is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one field ('name', 'description', or 'pinned') must be updated.")
+
+    store = ProjectStore()
+    # Ensure project exists and is owned by the user
+    _map_exceptions(store.get_project_metadata, identity["username"], project_id)
+
+    if body.pinned is not None:
+        _map_exceptions(store.set_pinned, identity["username"], project_id, body.pinned)
+
+    if body.name is not None or body.description is not None:
+        _map_exceptions(store.update_project_metadata, identity["username"], project_id, body.name, body.description)
+
+    # Re-fetch final updated metadata
+    metadata = _map_exceptions(store.get_project_metadata, identity["username"], project_id)
+    return ProjectMetadataResponse(**metadata)
+
+
 @router.delete("/project/delete/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(
     project_id: str,
@@ -110,6 +161,7 @@ async def upload_project_assets(
     instruction: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     identity: dict = Depends(require_approved_identity_web),
+    db: DatabaseManager = Depends(get_db),
 ):
     """Handles updating project instructions (text) and/or uploading a knowledge file.
 
@@ -126,8 +178,13 @@ async def upload_project_assets(
         _map_exceptions(store.update_instruction, identity["username"], project_id, instruction)
 
     if file is not None:
+        role = identity.get("role", "Member")
+        role_settings = db.get_role_settings(role)
+        max_mb = role_settings["max_upload_mb"] if role_settings else 128
+        max_bytes = max_mb * 1024 * 1024
+
         content_bytes = await file.read()
-        _map_exceptions(store.save_knowledge_file, identity["username"], project_id, file.filename, content_bytes)
+        _map_exceptions(store.save_knowledge_file, identity["username"], project_id, file.filename, content_bytes, max_bytes)
 
     # Re-fetch updated metadata with touched updated_at
     metadata = _map_exceptions(store.get_project_metadata, identity["username"], project_id)

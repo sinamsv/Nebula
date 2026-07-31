@@ -13,6 +13,23 @@ class ProjectMetadataResponse(BaseModel):
     owner: str
     created_at: str
     updated_at: str
+    pinned: bool
+
+class ProjectDetailResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    owner: str
+    created_at: str
+    updated_at: str
+    pinned: bool
+    instruction: str
+    files: List[str]
+
+class ProjectUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    pinned: Optional[bool] = None
 
 class ProjectListResponse(BaseModel):
     projects: List[ProjectMetadataResponse]

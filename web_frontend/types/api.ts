@@ -134,6 +134,7 @@ export interface RoleSettingItem {
   allowed_tools: string[];
   daily_limit: number;
   weekly_limit: number;
+  max_upload_mb: number;
 }
 
 export interface RoleSettingsListResponse {
@@ -146,6 +147,7 @@ export interface RoleSettingsUpdateRequest {
   allowed_tools: string[];
   daily_limit: number;
   weekly_limit: number;
+  max_upload_mb: number;
 }
 
 export interface UserUsageResponse {
@@ -157,6 +159,72 @@ export interface UserUsageResponse {
   role: string;
   unlimited_mode: string;
   unlimited_expires_at: string | null;
+}
+
+// ---------------------------------------------------------------------
+// Projects
+// ---------------------------------------------------------------------
+
+export interface ProjectMetadata {
+  id: string;
+  name: string;
+  description: string;
+  owner: string;
+  created_at: string;
+  updated_at: string;
+  pinned: boolean;
+}
+
+export interface ProjectListResponse {
+  projects: ProjectMetadata[];
+}
+
+export interface ProjectDetailResponse {
+  id: string;
+  name: string;
+  description: string;
+  owner: string;
+  created_at: string;
+  updated_at: string;
+  pinned: boolean;
+  instruction: string;
+  files: string[];
+}
+
+export interface ProjectUpdateRequest {
+  name?: string;
+  description?: string;
+  pinned?: boolean;
+}
+
+export interface ProjectChatSummary {
+  chat_id: string;
+  title: string;
+  created_at: string;
+  last_message_at: string;
+}
+
+export interface ProjectChatListResponse {
+  chats: ProjectChatSummary[];
+}
+
+export interface ProjectChatMessage {
+  role: string;
+  content: string;
+  timestamp: string;
+}
+
+export interface ProjectChatHistoryResponse {
+  chat_id: string;
+  title: string;
+  messages: ProjectChatMessage[];
+}
+
+export interface ProjectSendMessageResponse {
+  reply_text: string | null;
+  tool_messages: string[];
+  memory_warning: string | null;
+  usage: MemoryUsage;
 }
 
 // ---------------------------------------------------------------------

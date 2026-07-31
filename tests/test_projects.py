@@ -168,6 +168,9 @@ class TestProjectsIntegration(unittest.TestCase):
         self.spy_provider = SpyProvider("I am a helpful assistant.")
         self.handler.provider = self.spy_provider
 
+        # Seed default model config so AI turns are allowed
+        self.db.save_model("google/gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite", ["Member", "Trusted", "Researcher", "Admin"])
+
         self.app = create_app(self.db, self.auth, self.memory, self.coins, self.handler)
         self.client = TestClient(self.app)
 
@@ -287,6 +290,98 @@ class TestProjectsIntegration(unittest.TestCase):
         # Re-verify project folder is gone
         r = self.client.get(f"/api/v1/project/{project_id}/chats", headers=self.alice_headers)
         self.assertEqual(r.status_code, 404)
+
+    def test_backend_additions_stage_1(self):
+        # Create a new project as Alice
+        r = self.client.post("/api/v1/project/create", json={
+            "name": "Additions Project", "description": "Backend stage 1 test"
+        }, headers=self.alice_headers)
+        self.assertEqual(r.status_code, 201)
+        project_id = r.json()["id"]
+        self.assertEqual(r.json()["pinned"], False) # defaults to False
+
+        # Pin project using PATCH
+        r = self.client.patch(f"/api/v1/project/{project_id}", json={
+            "pinned": True
+        }, headers=self.alice_headers)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["pinned"], True)
+
+        # Unpin project using PATCH
+        r = self.client.patch(f"/api/v1/project/{project_id}", json={
+            "pinned": False
+        }, headers=self.alice_headers)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["pinned"], False)
+
+        # Rename and update description using PATCH
+        r = self.client.patch(f"/api/v1/project/{project_id}", json={
+            "name": "New Name", "description": "New Desc", "pinned": True
+        }, headers=self.alice_headers)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["name"], "New Name")
+        self.assertEqual(r.json()["description"], "New Desc")
+        self.assertEqual(r.json()["pinned"], True)
+
+        # Empty name validation check
+        r = self.client.patch(f"/api/v1/project/{project_id}", json={
+            "name": "   "
+        }, headers=self.alice_headers)
+        self.assertEqual(r.status_code, 400) # Empty/whitespace rejected
+
+        # Empty PATCH body check (all fields None)
+        r = self.client.patch(f"/api/v1/project/{project_id}", json={}, headers=self.alice_headers)
+        self.assertEqual(r.status_code, 400)
+
+        # Bob accessing Alice's project PATCH is rejected/404
+        r = self.client.patch(f"/api/v1/project/{project_id}", json={"name": "Bob Rename"}, headers=self.bob_headers)
+        self.assertEqual(r.status_code, 404)
+
+        # File size limit checks
+        r = self.client.post("/api/v1/project/create", json={
+            "name": "Bob Project", "description": "Bob Stage 1 tests"
+        }, headers=self.bob_headers)
+        bob_project_id = r.json()["id"]
+
+        # Let's temporarily lower Bob's role's max_upload_mb to 0 for a test case so a tiny file is rejected!
+        r = self.client.put("/api/v1/admin/roles/settings", json={
+            "role": "Member",
+            "allowed_models": [],
+            "allowed_tools": ["search"],
+            "daily_limit": 50.0,
+            "weekly_limit": 200.0,
+            "max_upload_mb": 0 # Set to 0MB upload limit to test rejection!
+        }, headers=self.alice_headers)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["max_upload_mb"], 0)
+
+        # Bob tries to upload a small file, which should fail because 22 bytes > 0 bytes limit!
+        r = self.client.post(
+            f"/api/v1/project/{bob_project_id}/upload",
+            files={"file": ("readme.txt", b"Hello, this is a test.")},
+            headers=self.bob_headers,
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("File size exceeds", r.json()["detail"])
+
+        # Change Bob's (Member) limit to 1MB and retry
+        r = self.client.put("/api/v1/admin/roles/settings", json={
+            "role": "Member",
+            "allowed_models": [],
+            "allowed_tools": ["search"],
+            "daily_limit": 50.0,
+            "weekly_limit": 200.0,
+            "max_upload_mb": 1
+        }, headers=self.alice_headers)
+        self.assertEqual(r.status_code, 200)
+
+        # Bob uploads the small file, should succeed
+        r = self.client.post(
+            f"/api/v1/project/{bob_project_id}/upload",
+            files={"file": ("readme.txt", b"Hello, this is a test.")},
+            headers=self.bob_headers,
+        )
+        self.assertEqual(r.status_code, 200)
 
 
 if __name__ == "__main__":
