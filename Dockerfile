@@ -1,20 +1,32 @@
 # syntax=docker/dockerfile:1
 
-# Railway / PaaS Deployment Changes (v1.6.1):
-# - EXPOSE 8080 only (no longer also 8000): FastAPI is internal-only since
-#   v1.6.1 (bound to 127.0.0.1 in main.py, proxied by Next.js's rewrites())
-#   -- it was never meant to be reached directly from outside the
-#   container, so publishing/exposing that port was misleading. Next.js
-#   (port 8080 by default, or Railway's injected PORT) is the only thing
-#   that needs to be reachable from outside.
-# - Frontend build stays 100% in the builder stage below (unchanged) --
-#   main.py no longer re-checks/rebuilds at container startup (see
-#   main.py's module docstring), so what this Dockerfile produces at
-#   build time is exactly what ships and runs, with no runtime surprises.
-# - Added a HEALTHCHECK hitting Next.js's own root path -- useful for
-#   Railway's healthcheck feature and for `docker compose` alike, confirms
-#   the single public port is actually accepting connections.
-# - How to revert: add back `EXPOSE 8000`, drop the HEALTHCHECK.
+# Railway / PaaS Deployment Changes (v1.7.x):
+# - Dockerfile now ONLY builds/installs. Runtime process management
+#   (starting FastAPI + Next.js together, and shutting both down
+#   cleanly on SIGINT/SIGTERM) is entirely start.sh's job now -- see
+#   ENTRYPOINT at the bottom. main.py no longer spawns the frontend
+#   itself (that subprocess logic has been removed), so start.sh is
+#   the only thing that ever launches `npm run start`.
+# - start.sh skips its dependency-check / build logic here via
+#   SKIP_DEPS_CHECK=true (see ENV below): this image already ran
+#   `pip install` and `npm install && npm run build` at build time,
+#   so start.sh doesn't need to (and shouldn't) redo that at container
+#   startup -- it just execs `python main.py` and `npm run start`
+#   directly.
+# - EXPOSE 8080 only: FastAPI is internal-only (bound to 127.0.0.1 in
+#   main.py, proxied by Next.js's rewrites()) -- it was never meant to
+#   be reached directly from outside the container. Next.js (port 8080
+#   by default, or Railway's injected PORT) is the only thing that
+#   needs to be reachable from outside.
+# - Frontend build stays 100% in the builder stage below -- what this
+#   Dockerfile produces at build time is exactly what ships and runs,
+#   with no runtime install/build surprises.
+# - HEALTHCHECK hits Next.js's own root path -- useful for Railway's
+#   healthcheck feature and for `docker compose` alike, confirms the
+#   single public port is actually accepting connections.
+# - How to revert to main.py-managed frontend: restore the subprocess
+#   spawn in main.py, drop start.sh, set ENTRYPOINT back to
+#   ["python", "main.py"].
 
 # ---- Python build stage: compile wheels so the final image doesn't need gcc/build tools ----
 FROM python:3.11-slim AS py-builder
@@ -33,11 +45,10 @@ RUN pip install --user --no-cache-dir -r requirements.txt
 # Separate image (node, not python:3.11-slim) since this stage needs
 # Node/npm, not Python -- only its OUTPUT (node_modules + the compiled
 # .next/ build) gets copied into the final runtime stage below, so
-# none of Node's own build tooling ends up in the image Nebula
-# actually ships/runs. This is the ONLY place npm install/build ever
-# runs now -- main.py deliberately does NOT re-check or rebuild at
-# container startup (see main.py's module docstring for why that broke
-# PaaS deployments).
+# none of Node's own build tooling ends up bloating that stage. This
+# is the ONLY place npm install/build ever runs -- start.sh
+# deliberately does NOT re-check or rebuild at container startup (see
+# SKIP_DEPS_CHECK below and start.sh itself).
 FROM node:20-slim AS frontend-builder
 
 WORKDIR /build/web_frontend
@@ -80,12 +91,13 @@ FROM python:3.11-slim AS runtime
 # ephemeral across deploys.
 WORKDIR /app
 
-# Node.js is installed in the RUNTIME image too (not just the builder
-# stage) because main.py runs `npm run start` as a live subprocess for
-# as long as the container runs -- that needs a working `node`/`npm`
-# on PATH at runtime, not just at build time. `curl` is installed for
-# the HEALTHCHECK below. This is NodeSource's official Debian/Ubuntu
-# install method, matching python:3.11-slim's own Debian base.
+# Node.js is still installed in the RUNTIME image (not just the
+# builder stage) because start.sh runs `npm run start` as a live
+# subprocess for as long as the container runs -- that needs a
+# working `node`/`npm` on PATH at runtime, not just at build time.
+# `curl` is installed for the HEALTHCHECK below. This is NodeSource's
+# official Debian/Ubuntu install method, matching python:3.11-slim's
+# own Debian base.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         gnupg \
@@ -106,7 +118,7 @@ RUN groupadd --gid 1000 nebula && \
 # gcc/build tools in the final image at all).
 COPY --from=py-builder /root/.local /home/nebula/.local
 
-# Backend source.
+# Backend source (includes start.sh at the repo root).
 COPY . .
 
 # Bring in the ALREADY-BUILT frontend from frontend-builder: its
@@ -123,24 +135,32 @@ COPY --from=frontend-builder /build/web_frontend/public ./web_frontend/public
 COPY --from=frontend-builder /build/web_frontend/package.json ./web_frontend/package.json
 COPY --from=frontend-builder /build/web_frontend/next.config.mjs ./web_frontend/next.config.mjs
 
-RUN chown -R nebula:nebula /app
+# start.sh needs to be executable -- explicit chmod rather than relying
+# on the source file's own permission bits surviving `COPY . .` (git
+# doesn't always preserve the executable bit across clones/CI, and a
+# non-executable ENTRYPOINT script fails the container outright).
+RUN chmod +x ./start.sh && chown -R nebula:nebula /app
 
 USER nebula
 
 # Matches --user pip installs going to ~/.local/bin — needed for any
-# console-script entry points pulled in by dependencies.
+# console-script entry points pulled in by dependencies. Also required
+# for start.sh's own `python main.py` invocation to find the right
+# interpreter and any pip-installed console scripts on PATH.
 ENV PATH="/home/nebula/.local/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    NODE_ENV=production \
+    SKIP_DEPS_CHECK=true
 
 # Port configuration:
 # 8080: the Next.js frontend -- the ONLY port meant to be reached from
 # outside the container. On Railway (or any platform that injects
 # PORT), Next.js binds to PORT instead of 8080 automatically -- see
-# web_frontend/package.json's "start" script and main.py's
-# _resolve_public_port(). FastAPI (port 8000 by default) is
-# intentionally NOT exposed here since v1.6.1 -- it's internal-only,
-# reached only via Next.js's own rewrites() proxy over localhost.
+# web_frontend/package.json's "start" script and start.sh's PORT
+# resolution. FastAPI (port 8000 by default) is intentionally NOT
+# exposed here -- it's internal-only, reached only via Next.js's own
+# rewrites() proxy over localhost.
 EXPOSE 8080
 
 # Confirms the single public port is actually up and accepting
@@ -151,4 +171,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD curl -f "http://localhost:${PORT:-8080}/" || exit 1
 
-ENTRYPOINT ["python", "main.py"]
+ENTRYPOINT ["./start.sh"]
