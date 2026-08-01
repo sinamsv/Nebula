@@ -43,6 +43,15 @@ import type {
   ModelConfigItem,
   AvailableModelItem,
   AvailableModelsResponse,
+  ProjectMetadata,
+  ProjectListResponse,
+  ProjectUpdateRequest,
+  ProjectChatSummary,
+  ProjectChatListResponse,
+  ProjectChatMessage,
+  ProjectChatHistoryResponse,
+  ProjectSendMessageResponse,
+  ProjectDetailResponse,
 } from "@/types/api";
 import { ApiError } from "@/types/api";
 
@@ -333,6 +342,91 @@ export function getUserUsage(
   userId: number
 ): Promise<any> {
   return request<any>(`/admin/users/${userId}/usage`, { token });
+}
+
+// ---------------------------------------------------------------------
+// Projects
+// ---------------------------------------------------------------------
+
+export function listProjects(token: string, username: string): Promise<ProjectListResponse> {
+  return request<ProjectListResponse>(`/projects/${username}`, { token });
+}
+
+export function getProjectDetails(token: string, projectId: string): Promise<ProjectDetailResponse> {
+  return request<ProjectDetailResponse>(`/project/${projectId}`, { token });
+}
+
+export function createProject(token: string, name: string, description?: string): Promise<ProjectMetadata> {
+  return request<ProjectMetadata>("/project/create", {
+    method: "POST",
+    token,
+    json: { name, description },
+  });
+}
+
+export function updateProject(token: string, projectId: string, body: ProjectUpdateRequest): Promise<ProjectMetadata> {
+  return request<ProjectMetadata>(`/project/${projectId}`, {
+    method: "PATCH",
+    token,
+    json: body,
+  });
+}
+
+export function deleteProject(token: string, projectId: string): Promise<void> {
+  return request<void>(`/project/delete/${projectId}`, {
+    method: "DELETE",
+    token,
+  });
+}
+
+export function uploadProjectAsset(
+  token: string,
+  projectId: string,
+  options: { instruction?: string; file?: File }
+): Promise<ProjectMetadata> {
+  const formData = new FormData();
+  if (options.instruction !== undefined) {
+    formData.append("instruction", options.instruction);
+  }
+  if (options.file !== undefined) {
+    formData.append("file", options.file);
+  }
+  return request<ProjectMetadata>(`/project/${projectId}/upload`, {
+    method: "POST",
+    token,
+    formData,
+  });
+}
+
+export function listProjectChats(token: string, projectId: string): Promise<ProjectChatListResponse> {
+  return request<ProjectChatListResponse>(`/project/${projectId}/chats`, { token });
+}
+
+export function createProjectChat(token: string, projectId: string, title?: string): Promise<ProjectChatSummary> {
+  return request<ProjectChatSummary>(`/project/${projectId}/chats`, {
+    method: "POST",
+    token,
+    json: { title },
+  });
+}
+
+export function getProjectChatHistory(token: string, projectId: string, chatId: string): Promise<ProjectChatHistoryResponse> {
+  return request<ProjectChatHistoryResponse>(`/project/${projectId}/chat/${chatId}`, { token });
+}
+
+export function sendProjectChatMessage(
+  token: string,
+  projectId: string,
+  chatId: string,
+  input: string,
+  tools: ToolToggles = { search: "smart" },
+  model?: string
+): Promise<ProjectSendMessageResponse> {
+  return request<ProjectSendMessageResponse>(`/project/${projectId}/chat/${chatId}`, {
+    method: "POST",
+    token,
+    json: { input, tools, model },
+  });
 }
 
 // ---------------------------------------------------------------------

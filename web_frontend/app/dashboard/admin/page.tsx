@@ -495,6 +495,7 @@ function RoleSettingsSection({ token }: { token: string }) {
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
   const [dailyLimit, setDailyLimit] = useState("");
   const [weeklyLimit, setWeeklyLimit] = useState("");
+  const [maxUploadMb, setMaxUploadMb] = useState("");
   const [allowedModels, setAllowedModels] = useState("");
   const [allowedTools, setAllowedTools] = useState<string[]>([]);
 
@@ -520,6 +521,7 @@ function RoleSettingsSection({ token }: { token: string }) {
     setWeeklyLimit(String(roleItem.weekly_limit));
     setAllowedModels(roleItem.allowed_models.join(", "));
     setAllowedTools(roleItem.allowed_tools);
+    setMaxUploadMb(String(roleItem.max_upload_mb ?? 128));
   }
 
   useEffect(() => {
@@ -535,6 +537,7 @@ function RoleSettingsSection({ token }: { token: string }) {
 
     const parsedDaily = Number(dailyLimit);
     const parsedWeekly = Number(weeklyLimit);
+    const parsedMaxUpload = Number(maxUploadMb);
 
     const modelsList = allowedModels.split(",").map(m => m.trim()).filter(m => m.length > 0);
 
@@ -545,6 +548,7 @@ function RoleSettingsSection({ token }: { token: string }) {
         allowed_tools: allowedTools,
         daily_limit: parsedDaily,
         weekly_limit: parsedWeekly,
+        max_upload_mb: parsedMaxUpload,
       });
       const res = await getRoleSettings(token);
       setSettings(res.settings);
@@ -594,7 +598,7 @@ function RoleSettingsSection({ token }: { token: string }) {
 
           {selectedRole && (
             <form onSubmit={handleUpdate} className="flex flex-col gap-3">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <TextField
                   label="Daily Coin Limit (-1 for unlimited)"
                   value={dailyLimit}
@@ -608,6 +612,14 @@ function RoleSettingsSection({ token }: { token: string }) {
                   value={weeklyLimit}
                   onChange={(e) => setWeeklyLimit(e.target.value)}
                   placeholder="e.g. 200"
+                  inputMode="numeric"
+                  required
+                />
+                <TextField
+                  label="Max Upload Size (MB)"
+                  value={maxUploadMb}
+                  onChange={(e) => setMaxUploadMb(e.target.value)}
+                  placeholder="e.g. 128"
                   inputMode="numeric"
                   required
                 />

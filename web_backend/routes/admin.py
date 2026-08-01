@@ -226,7 +226,8 @@ async def get_all_roles_settings(
             allowed_models=s['allowed_models'],
             allowed_tools=s['allowed_tools'],
             daily_limit=s['daily_limit'],
-            weekly_limit=s['weekly_limit']
+            weekly_limit=s['weekly_limit'],
+            max_upload_mb=s['max_upload_mb']
         )
         for s in settings
     ])
@@ -243,7 +244,8 @@ async def update_role_settings_route(
         body.allowed_models,
         body.allowed_tools,
         body.daily_limit,
-        body.weekly_limit
+        body.weekly_limit,
+        body.max_upload_mb
     )
     settings = db.get_role_settings(body.role)
     return RoleSettingItem(
@@ -251,7 +253,8 @@ async def update_role_settings_route(
         allowed_models=settings['allowed_models'],
         allowed_tools=settings['allowed_tools'],
         daily_limit=settings['daily_limit'],
-        weekly_limit=settings['weekly_limit']
+        weekly_limit=settings['weekly_limit'],
+        max_upload_mb=settings['max_upload_mb']
     )
 
 

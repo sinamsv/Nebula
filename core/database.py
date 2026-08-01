@@ -212,22 +212,33 @@ class DatabaseManager:
                 allowed_models TEXT NOT NULL,
                 allowed_tools TEXT NOT NULL,
                 daily_limit REAL NOT NULL,
-                weekly_limit REAL NOT NULL
+                weekly_limit REAL NOT NULL,
+                max_upload_mb INTEGER NOT NULL DEFAULT 128
             )
         ''')
 
+        cursor.execute("PRAGMA table_info(role_settings)")
+        existing_role_settings_columns = {row[1] for row in cursor.fetchall()}
+        if 'max_upload_mb' not in existing_role_settings_columns:
+            cursor.execute("ALTER TABLE role_settings ADD COLUMN max_upload_mb INTEGER NOT NULL DEFAULT 128")
+            cursor.execute("UPDATE role_settings SET max_upload_mb = 128 WHERE role = 'Member'")
+            cursor.execute("UPDATE role_settings SET max_upload_mb = 256 WHERE role = 'Trusted'")
+            cursor.execute("UPDATE role_settings SET max_upload_mb = 512 WHERE role = 'Researcher'")
+            cursor.execute("UPDATE role_settings SET max_upload_mb = 512 WHERE role = 'Admin'")
+            print("Migrated role_settings: added max_upload_mb column with default values")
+
         # Seed default role settings
         default_settings = [
-            ('Member', '[]', '["search"]', 50.0, 200.0),
-            ('Trusted', '[]', '["search"]', 150.0, 600.0),
-            ('Researcher', '[]', '["search"]', 500.0, 2000.0),
-            ('Admin', '[]', '["search"]', -1.0, -1.0)
+            ('Member', '[]', '["search"]', 50.0, 200.0, 128),
+            ('Trusted', '[]', '["search"]', 150.0, 600.0, 256),
+            ('Researcher', '[]', '["search"]', 500.0, 2000.0, 512),
+            ('Admin', '[]', '["search"]', -1.0, -1.0, 512)
         ]
-        for r_name, models, tools, daily, weekly in default_settings:
+        for r_name, models, tools, daily, weekly, max_up in default_settings:
             cursor.execute('''
-                INSERT OR IGNORE INTO role_settings (role, allowed_models, allowed_tools, daily_limit, weekly_limit)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (r_name, models, tools, daily, weekly))
+                INSERT OR IGNORE INTO role_settings (role, allowed_models, allowed_tools, daily_limit, weekly_limit, max_upload_mb)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (r_name, models, tools, daily, weekly, max_up))
 
         # ------------------------------------------------------------
         # Models configuration (JSON-backed DB Table)
@@ -504,7 +515,7 @@ class DatabaseManager:
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT role, allowed_models, allowed_tools, daily_limit, weekly_limit
+            SELECT role, allowed_models, allowed_tools, daily_limit, weekly_limit, max_upload_mb
             FROM role_settings WHERE role = ?
         ''', (role,))
         row = cursor.fetchone()
@@ -517,14 +528,15 @@ class DatabaseManager:
             'allowed_models': json.loads(row[1]),
             'allowed_tools': json.loads(row[2]),
             'daily_limit': row[3],
-            'weekly_limit': row[4]
+            'weekly_limit': row[4],
+            'max_upload_mb': row[5]
         }
 
     def get_all_role_settings(self) -> List[Dict]:
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT role, allowed_models, allowed_tools, daily_limit, weekly_limit
+            SELECT role, allowed_models, allowed_tools, daily_limit, weekly_limit, max_upload_mb
             FROM role_settings
         ''')
         rows = cursor.fetchall()
@@ -536,12 +548,13 @@ class DatabaseManager:
                 'allowed_models': json.loads(r[1]),
                 'allowed_tools': json.loads(r[2]),
                 'daily_limit': r[3],
-                'weekly_limit': r[4]
+                'weekly_limit': r[4],
+                'max_upload_mb': r[5]
             }
             for r in rows
         ]
 
-    def update_role_settings(self, role: str, allowed_models: List[str], allowed_tools: List[str], daily_limit: float, weekly_limit: float) -> bool:
+    def update_role_settings(self, role: str, allowed_models: List[str], allowed_tools: List[str], daily_limit: float, weekly_limit: float, max_upload_mb: int) -> bool:
         conn = self.get_connection()
         cursor = conn.cursor()
         import json
@@ -549,9 +562,9 @@ class DatabaseManager:
         tools_str = json.dumps(allowed_tools)
         cursor.execute('''
             UPDATE role_settings
-            SET allowed_models = ?, allowed_tools = ?, daily_limit = ?, weekly_limit = ?
+            SET allowed_models = ?, allowed_tools = ?, daily_limit = ?, weekly_limit = ?, max_upload_mb = ?
             WHERE role = ?
-        ''', (models_str, tools_str, daily_limit, weekly_limit, role))
+        ''', (models_str, tools_str, daily_limit, weekly_limit, max_upload_mb, role))
         conn.commit()
         changed = cursor.rowcount > 0
         conn.close()
